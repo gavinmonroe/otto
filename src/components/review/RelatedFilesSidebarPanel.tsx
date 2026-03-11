@@ -63,13 +63,13 @@ export function RelatedFilesSidebarPanel() {
       {expanded && (
         <div style={{ overflowY: 'auto', maxHeight: '300px' }}>
           {relatedFiles.map((file) => (
-            <SidebarFileRow
+             <SidebarFileRow
               key={file.filePath}
               file={file}
               theme={theme}
               hostUrl={mrContext?.hostUrl}
               projectPath={mrContext?.projectPath}
-              targetBranch={mrContext?.targetBranch}
+              branch={mrContext?.sourceBranch}
             />
           ))}
         </div>
@@ -112,13 +112,13 @@ function SidebarFileRow({
   theme,
   hostUrl,
   projectPath,
-  targetBranch,
+  branch,
 }: {
   file: RelatedFile;
   theme: OttoTheme;
   hostUrl?: string;
   projectPath?: string;
-  targetBranch?: string;
+  branch?: string;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -130,8 +130,8 @@ function SidebarFileRow({
   const iconColor = getFileIconColor(file.filePath, theme.isDark);
 
   // Build GitLab blob URL
-  const blobUrl = hostUrl && projectPath && targetBranch
-    ? `${hostUrl}/${projectPath}/-/blob/${targetBranch}/${file.filePath}`
+  const blobUrl = hostUrl && projectPath && branch
+    ? `${hostUrl}/${projectPath}/-/blob/${branch}/${file.filePath}`
     : null;
 
   const relationshipLabel: Record<string, string> = {

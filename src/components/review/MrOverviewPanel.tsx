@@ -127,7 +127,24 @@ export function MrOverviewPanel() {
 
       {/* Error */}
       {hasError && review.error && (
-        <div style={s.error}>{review.error}</div>
+        <div style={s.error}>
+          {review.error.replace(/Try again\.?/, '').trim()}{' '}
+          <button
+            onClick={handleStartReview}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'inherit',
+              cursor: 'pointer',
+              fontSize: 'inherit',
+              fontWeight: 600,
+              padding: 0,
+              textDecoration: 'underline',
+            }}
+          >
+            Try again
+          </button>
+        </div>
       )}
 
       {/* Progress bar */}

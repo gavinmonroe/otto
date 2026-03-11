@@ -299,14 +299,14 @@ function FilePreviewPanel({
 // ---------------------------------------------------------------------------
 
 function buildGitLabFileUrl(
-  mrContext: { hostUrl: string; projectPath: string; targetBranch: string } | null,
+  mrContext: { hostUrl: string; projectPath: string; sourceBranch: string; targetBranch: string } | null,
   filePath: string,
   line?: number | null,
   lineEnd?: number | null,
 ): string {
   if (!mrContext) return '#';
 
-  const base = `${mrContext.hostUrl}/${mrContext.projectPath}/-/blob/${mrContext.targetBranch}/${filePath}`;
+  const base = `${mrContext.hostUrl}/${mrContext.projectPath}/-/blob/${mrContext.sourceBranch}/${filePath}`;
   if (line) {
     const lineHash = lineEnd && lineEnd !== line ? `#L${line}-${lineEnd}` : `#L${line}`;
     return base + lineHash;
