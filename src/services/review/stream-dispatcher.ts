@@ -4,6 +4,10 @@
 // auto-review function in the content script.
 //
 // Extracted to avoid duplicating the chunk→store mapping in two places.
+//
+// Performance: streaming deltas are batched and flushed at ~60fps via
+// requestAnimationFrame. This prevents hundreds of store updates per second
+// from hammering subscriptions and crashing the tab on large MRs.
 // ---------------------------------------------------------------------------
 
 import { useReviewStore } from '@/services/review/review-store';
@@ -18,33 +22,92 @@ import {
   type CachedReview,
 } from './review-cache';
 
+// ---------------------------------------------------------------------------
+// Delta batching — accumulates streaming deltas and flushes once per frame.
+// ---------------------------------------------------------------------------
+
+let pendingSummaryDelta = '';
+const pendingFileDeltas = new Map<string, string>();
+let pendingEdgeCasesDelta = '';
+let flushScheduled = false;
+
+function scheduleDeltaFlush(): void {
+  if (flushScheduled) return;
+  flushScheduled = true;
+  requestAnimationFrame(flushDeltas);
+}
+
+function flushDeltas(): void {
+  flushScheduled = false;
+  const s = useReviewStore.getState();
+
+  if (pendingSummaryDelta) {
+    s.appendSummaryDelta(pendingSummaryDelta);
+    pendingSummaryDelta = '';
+  }
+
+  if (pendingFileDeltas.size > 0) {
+    for (const [filePath, content] of pendingFileDeltas) {
+      s.appendFileReviewDelta(filePath, content);
+    }
+    pendingFileDeltas.clear();
+  }
+
+  if (pendingEdgeCasesDelta) {
+    s.appendEdgeCasesDelta(pendingEdgeCasesDelta);
+    pendingEdgeCasesDelta = '';
+  }
+}
+
 /**
  * Dispatch a stream chunk to the review store.
- * Maps each chunk type to the appropriate store action.
+ * Delta chunks are batched; completion/error chunks are dispatched immediately.
  */
 export function dispatchStreamChunk(chunk: StreamChunk): void {
   const s = useReviewStore.getState();
 
   switch (chunk.type) {
     case 'STREAM_SUMMARY_DELTA':
-      s.appendSummaryDelta(chunk.payload.content);
+      pendingSummaryDelta += chunk.payload.content;
+      scheduleDeltaFlush();
       break;
     case 'STREAM_SUMMARY_COMPLETE':
+      // Flush any pending summary delta first
+      if (pendingSummaryDelta) {
+        s.appendSummaryDelta(pendingSummaryDelta);
+        pendingSummaryDelta = '';
+      }
       s.setSummary(chunk.payload.summary);
       break;
-    case 'STREAM_FILE_REVIEW_DELTA':
-      s.appendFileReviewDelta(chunk.payload.filePath, chunk.payload.content);
+    case 'STREAM_FILE_REVIEW_DELTA': {
+      const existing = pendingFileDeltas.get(chunk.payload.filePath) || '';
+      pendingFileDeltas.set(chunk.payload.filePath, existing + chunk.payload.content);
+      scheduleDeltaFlush();
       break;
-    case 'STREAM_FILE_REVIEW_COMPLETE':
+    }
+    case 'STREAM_FILE_REVIEW_COMPLETE': {
+      // Flush any pending delta for this file first
+      const filePath = chunk.payload.fileReview.filePath;
+      if (pendingFileDeltas.has(filePath)) {
+        s.appendFileReviewDelta(filePath, pendingFileDeltas.get(filePath)!);
+        pendingFileDeltas.delete(filePath);
+      }
       s.addFileReview(chunk.payload.fileReview);
       break;
+    }
     case 'STREAM_RELATED_FILES_COMPLETE':
       s.setRelatedFiles(chunk.payload.files);
       break;
     case 'STREAM_EDGE_CASES_DELTA':
-      s.appendEdgeCasesDelta(chunk.payload.content);
+      pendingEdgeCasesDelta += chunk.payload.content;
+      scheduleDeltaFlush();
       break;
     case 'STREAM_EDGE_CASES_COMPLETE':
+      // Flush any pending edge cases delta first
+      if (pendingEdgeCasesDelta) {
+        s.appendEdgeCasesDelta(pendingEdgeCasesDelta);
+        pendingEdgeCasesDelta = '';
+      }
       s.setEdgeCases(chunk.payload.edgeCases);
       break;
     case 'STREAM_PROGRESS':
@@ -58,6 +121,8 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
       break;
     }
     case 'STREAM_ALL_COMPLETE':
+      // Flush any remaining deltas before completing
+      flushDeltas();
       s.completeReview();
       break;
   }
