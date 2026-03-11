@@ -15,6 +15,7 @@ import { ChevronRight, ChevronDown, AlertTriangle, AlertCircle, Lightbulb, Info,
 import { useReviewStore } from '@/services/review/review-store';
 import { useTheme } from '@/components/ThemeContext';
 import type { OttoTheme } from '@/components/ThemeContext';
+import { Markdown } from '@/components/Markdown';
 import { ReviewActions } from './ReviewActions';
 import { OttoLogo } from '@/components/OttoLogo';
 import type { ReviewComment as ReviewCommentType, ReviewCommentStatus } from '@/types/review';
@@ -153,8 +154,8 @@ function CommentRow({
       {/* Expanded body */}
       {expanded && (
         <div style={s.commentBody}>
-          <div style={{ fontSize: '13px', lineHeight: '1.6', color: theme.text, whiteSpace: 'pre-wrap' }}>
-            {comment.editedBody || comment.body}
+          <div style={{ fontSize: '13px' }}>
+            <Markdown content={comment.editedBody || comment.body} compact />
           </div>
 
           {comment.suggestion && (
@@ -162,22 +163,7 @@ function CommentRow({
               <div style={{ fontSize: '11px', fontWeight: 600, color: theme.textSecondary, marginBottom: '4px' }}>
                 Suggested fix
               </div>
-              <pre style={{
-                margin: 0,
-                padding: '8px 10px',
-                fontSize: '12px',
-                fontFamily: 'monospace',
-                background: theme.isDark ? '#0f172a' : '#f8fafc',
-                color: theme.isDark ? '#e2e8f0' : '#334155',
-                borderRadius: '4px',
-                border: `1px solid ${theme.border}`,
-                overflow: 'auto',
-                maxHeight: '200px',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}>
-                {comment.suggestion}
-              </pre>
+              <Markdown content={`\`\`\`\n${comment.suggestion}\n\`\`\``} compact />
             </div>
           )}
 

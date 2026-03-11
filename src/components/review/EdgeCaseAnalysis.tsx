@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import type { EdgeCase } from '@/types/review';
 import { useTheme } from '@/components/ThemeContext';
+import { Markdown } from '@/components/Markdown';
 
 type EdgeCaseAnalysisProps = {
   edgeCases: EdgeCase[];
@@ -80,8 +81,8 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
       <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px', color: theme.text }}>
         {edgeCase.title}
       </div>
-      <div style={{ fontSize: '12px', lineHeight: '1.5', color: theme.text, whiteSpace: 'pre-wrap' }}>
-        {edgeCase.description}
+      <div style={{ fontSize: '12px' }}>
+        <Markdown content={edgeCase.description} compact />
       </div>
       {edgeCase.hypotheticalTrace && (
         <>
@@ -100,21 +101,9 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
             {showTrace ? 'Hide stack trace' : 'Show hypothetical stack trace'}
           </button>
           {showTrace && (
-            <pre style={{
-              margin: '6px 0 0',
-              padding: '8px',
-              fontSize: '11px',
-              fontFamily: 'monospace',
-              background: theme.isDark ? '#0f172a' : '#1f2937',
-              color: '#f87171',
-              borderRadius: '4px',
-              overflow: 'auto',
-              maxHeight: '200px',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}>
-              {edgeCase.hypotheticalTrace}
-            </pre>
+            <div style={{ marginTop: '6px' }}>
+              <Markdown content={`\`\`\`\n${edgeCase.hypotheticalTrace}\n\`\`\``} compact />
+            </div>
           )}
         </>
       )}

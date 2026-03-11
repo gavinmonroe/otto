@@ -5,6 +5,7 @@
 
 import type { ReviewComment as ReviewCommentType, ReviewCommentStatus } from '@/types/review';
 import { useTheme } from '@/components/ThemeContext';
+import { Markdown } from '@/components/Markdown';
 import { ReviewActions } from './ReviewActions';
 
 type ReviewCommentProps = {
@@ -51,23 +52,13 @@ export function ReviewComment({ comment, onUpdateStatus }: ReviewCommentProps) {
         )}
       </div>
       <div style={{ fontWeight: 600, margin: '4px 0 2px', color: theme.text }}>{comment.title}</div>
-      <div style={{ fontSize: '12px', lineHeight: '1.5', color: theme.text }}>{comment.editedBody || comment.body}</div>
+      <div style={{ fontSize: '12px' }}>
+        <Markdown content={comment.editedBody || comment.body} compact />
+      </div>
       {comment.suggestion && (
-        <pre style={{
-          margin: '6px 0',
-          padding: '6px 8px',
-          fontSize: '11px',
-          fontFamily: 'monospace',
-          background: theme.isDark ? '#0f172a' : 'rgba(0,0,0,0.04)',
-          color: theme.text,
-          borderRadius: '4px',
-          overflow: 'auto',
-          maxHeight: '150px',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}>
-          {comment.suggestion}
-        </pre>
+        <div style={{ fontSize: '12px' }}>
+          <Markdown content={`\`\`\`\n${comment.suggestion}\n\`\`\``} compact />
+        </div>
       )}
       <ReviewActions comment={comment} onUpdateStatus={onUpdateStatus} />
     </div>

@@ -13,6 +13,7 @@ import { useSettings } from '@/hooks/use-settings';
 import { useTheme } from '@/components/ThemeContext';
 import { sendMessage } from '@/lib/messaging';
 import { OttoLogo } from '@/components/OttoLogo';
+import { Markdown } from '@/components/Markdown';
 import { RelatedFilesPanel } from './RelatedFilesPanel';
 import { EdgeCaseAnalysis } from './EdgeCaseAnalysis';
 
@@ -139,17 +140,13 @@ export function MrOverviewPanel() {
         <div style={s.section}>
           <div style={s.sectionHeader}>Summary</div>
           {review.summary ? (
-            <div>
-              <p style={{ margin: '0 0 8px', fontSize: '13px' }}>{review.summary.overview}</p>
-              <p style={{ margin: '0 0 8px', fontSize: '12px', color: theme.textSecondary }}>
-                {review.summary.riskAssessment}
-              </p>
+            <div style={{ fontSize: '13px' }}>
+              <Markdown content={review.summary.overview} compact />
+              <div style={{ fontSize: '12px', color: theme.textSecondary, marginBottom: '6px' }}>
+                <Markdown content={review.summary.riskAssessment} compact />
+              </div>
               {review.summary.keyChanges.length > 0 && (
-                <ul style={{ margin: '0', padding: '0 0 0 16px', fontSize: '12px' }}>
-                  {review.summary.keyChanges.map((change, i) => (
-                    <li key={i} style={{ marginBottom: '2px' }}>{change}</li>
-                  ))}
-                </ul>
+                <Markdown content={review.summary.keyChanges.map((c) => `- ${c}`).join('\n')} compact />
               )}
             </div>
           ) : (
