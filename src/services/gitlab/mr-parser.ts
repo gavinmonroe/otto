@@ -40,13 +40,11 @@ export async function buildMrContext(useApi = true): Promise<MrContext | null> {
   // Start with DOM-parsed diff data
   let diffFiles: DiffFileData[] = parseDiffFilesFromDom();
 
-  // Default MR metadata from what we can infer
-  let title = document.querySelector('.merge-request .detail-page-header-body')?.textContent?.trim()
-    || document.querySelector('[data-testid="title-content"]')?.textContent?.trim()
-    || '';
-  let description: string | null = null;
-  let sourceBranch = '';
-  let targetBranch = '';
+  // Default MR metadata from what we can infer from the DOM
+  let title = extractTitleFromDom();
+  let description: string | null = extractDescriptionFromDom();
+  let sourceBranch = extractBranchFromDom('source');
+  let targetBranch = extractBranchFromDom('target');
   let projectId: number | null = null;
 
   // Try to get project ID from the DOM
@@ -113,4 +111,52 @@ export async function buildMrContext(useApi = true): Promise<MrContext | null> {
     targetBranch,
     diffFiles,
   };
+}
+
+// ---------------------------------------------------------------------------
+// DOM extraction helpers — used when no GitLab PAT is configured.
+// These parse MR metadata directly from the page DOM.
+// GitLab's DOM varies across versions, so we try multiple selectors.
+// ---------------------------------------------------------------------------
+
+function extractTitleFromDom(): string {
+  // Modern GitLab (16+)
+  const titleEl = document.querySelector('[data-testid="title-content"]')
+    // Older GitLab
+    || document.querySelector('.merge-request .detail-page-header-body .title')
+    || document.querySelector('.merge-request-details .title')
+    // Fallback: page title often contains "MR Title (!123)"
+    || document.querySelector('.page-title');
+
+  if (titleEl) {
+    return titleEl.textContent?.trim() || '';
+  }
+
+  // Last resort: parse from document.title — format is "Title (!123) · MRs · Project · GitLab"
+  const docTitle = document.title;
+  const match = docTitle.match(/^(.+?)\s*\(!?\d+\)/);
+  return match ? match[1].trim() : '';
+}
+
+function extractDescriptionFromDom(): string | null {
+  const descEl = document.querySelector('[data-testid="description-content"]')
+    || document.querySelector('.merge-request-details .description .md');
+
+  const text = descEl?.textContent?.trim();
+  return text || null;
+}
+
+function extractBranchFromDom(type: 'source' | 'target'): string {
+  // GitLab shows branch names in the MR header with clipboard buttons
+  if (type === 'source') {
+    const sourceEl = document.querySelector('[data-testid="source-branch-copy"]')
+      || document.querySelector('.mr-source-branch .ref-name')
+      || document.querySelector('.js-source-branch');
+    return sourceEl?.textContent?.trim() || '';
+  }
+
+  const targetEl = document.querySelector('[data-testid="target-branch-copy"]')
+    || document.querySelector('.mr-target-branch .ref-name')
+    || document.querySelector('.js-target-branch');
+  return targetEl?.textContent?.trim() || '';
 }
