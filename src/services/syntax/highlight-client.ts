@@ -29,6 +29,7 @@ export function extToLang(filePath: string): string | null {
     go: 'go',
     rs: 'rust',
     java: 'java',
+    cs: 'csharp', csx: 'csharp',
     sh: 'bash', bash: 'bash', zsh: 'bash',
     sql: 'sql',
     md: 'markdown', mdx: 'markdown',

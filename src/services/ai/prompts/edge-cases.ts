@@ -41,6 +41,8 @@ Guidelines:
 - If the changes are straightforward with no significant edge cases, return an empty array.
 - Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
 
+export const DEFAULT_EDGE_CASES_PROMPT = SYSTEM_PROMPT;
+
 export type EdgeCaseInput = {
   diffFiles: DiffFileData[];
   fileContents: Record<string, string>;  // filePath → full content (target branch)
@@ -48,7 +50,7 @@ export type EdgeCaseInput = {
   mrDescription: string | null;
 };
 
-export function buildEdgeCasePrompt(input: EdgeCaseInput): ChatMessage[] {
+export function buildEdgeCasePrompt(input: EdgeCaseInput, customSystemPrompt?: string): ChatMessage[] {
   const filesSection = input.diffFiles.map((f) => {
     let section = `## ${f.filePath}
 **Status:** ${f.isNew ? 'New file' : f.isDeleted ? 'Deleted' : 'Modified'}
@@ -81,7 +83,7 @@ ${input.mrDescription ? `\n## Description\n${input.mrDescription}\n` : ''}
 ${filesSection}`;
 
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: customSystemPrompt || SYSTEM_PROMPT },
     { role: 'user', content: userContent },
   ];
 }

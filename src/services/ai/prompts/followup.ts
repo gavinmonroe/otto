@@ -89,7 +89,9 @@ Guidelines:
 - If the thread has multiple notes, focus on the most recent note but use earlier notes for context.
 - Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
 
-export function buildFollowUpPrompt(input: FollowUpInput): ChatMessage[] {
+export const DEFAULT_FOLLOW_UP_PROMPT = SYSTEM_PROMPT;
+
+export function buildFollowUpPrompt(input: FollowUpInput, customSystemPrompt?: string): ChatMessage[] {
   const threadContent = input.thread.notes
     .map((note, i) => `### Comment ${i + 1} by ${note.author}${note.timestamp ? ` (${note.timestamp})` : ''}:\n${note.body}`)
     .join('\n\n');
@@ -147,7 +149,7 @@ ${input.mrDescription}`;
   }
 
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: customSystemPrompt || SYSTEM_PROMPT },
     { role: 'user', content: userContent },
   ];
 }

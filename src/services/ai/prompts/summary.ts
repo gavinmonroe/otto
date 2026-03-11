@@ -31,7 +31,9 @@ Guidelines:
 - Keep affectedAreas to 2-5 items. Use domain language, not file paths.
 - Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
 
-export function buildSummaryPrompt(context: MrContext): ChatMessage[] {
+export const DEFAULT_SUMMARY_PROMPT = SYSTEM_PROMPT;
+
+export function buildSummaryPrompt(context: MrContext, customSystemPrompt?: string): ChatMessage[] {
   const diffSummary = context.diffFiles.map((f) => {
     const status = f.isNew ? '[NEW]' : f.isDeleted ? '[DELETED]' : f.isRenamed ? '[RENAMED]' : '[MODIFIED]';
     return `${status} ${f.filePath} (+${f.addedLines} -${f.removedLines})\n${f.diff}`;
@@ -50,7 +52,7 @@ ${context.description || '(No description provided)'}
 ${diffSummary}`;
 
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: customSystemPrompt || SYSTEM_PROMPT },
     { role: 'user', content: userContent },
   ];
 }

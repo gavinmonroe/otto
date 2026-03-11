@@ -11,6 +11,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSettings } from '@/hooks/use-settings';
 import { AiProviderForm } from '@/components/settings/AiProviderForm';
+import { CustomPromptsForm } from '@/components/settings/CustomPromptsForm';
 import { GitLabConnectionForm } from '@/components/settings/GitLabConnectionForm';
 import { OttoLogo } from '@/components/OttoLogo';
 
@@ -81,6 +82,7 @@ export function App() {
 
       <div style={contentStyle}>
         <AiProviderForm settings={settings} onUpdate={updateAiConfig} />
+        <CustomPromptsForm settings={settings} onUpdate={updateAiConfig} />
         <GitLabConnectionForm settings={settings} onUpdate={updateSettings} />
 
         {/* Preferences */}

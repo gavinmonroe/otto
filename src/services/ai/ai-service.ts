@@ -178,6 +178,15 @@ function repairTruncatedJson(json: string): string | null {
   return trimmed.slice(0, lastCompleteObjectEnd + 1) + ']';
 }
 
+/**
+ * Get the custom system prompt for a task, or undefined if not set.
+ * Empty string means "use default".
+ */
+function getCustomPrompt(aiConfig: AiConfig, task: AiTaskType): string | undefined {
+  const value = aiConfig.customPrompts?.[task];
+  return value && value.trim() ? value : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // MR Summary
 // ---------------------------------------------------------------------------
@@ -192,7 +201,7 @@ export async function generateSummary(
   onDelta?: (content: string) => void,
   signal?: AbortSignal,
 ): Promise<Result<MrSummary>> {
-  const messages = buildSummaryPrompt(context);
+  const messages = buildSummaryPrompt(context, getCustomPrompt(aiConfig, 'summary'));
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'summary');
   const temperature = getTemperature(aiConfig, 'summary');
@@ -248,7 +257,7 @@ export async function generateFileReview(
   onDelta?: (content: string) => void,
   signal?: AbortSignal,
 ): Promise<Result<FileReview>> {
-  const messages = buildCodeReviewPrompt(input);
+  const messages = buildCodeReviewPrompt(input, getCustomPrompt(aiConfig, 'codeReview'));
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'codeReview');
   const temperature = getTemperature(aiConfig, 'codeReview');
@@ -322,7 +331,7 @@ export async function generateEdgeCases(
   onDelta?: (content: string) => void,
   signal?: AbortSignal,
 ): Promise<Result<EdgeCase[]>> {
-  const messages = buildEdgeCasePrompt(input);
+  const messages = buildEdgeCasePrompt(input, getCustomPrompt(aiConfig, 'edgeCases'));
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'edgeCases');
   const temperature = getTemperature(aiConfig, 'edgeCases');
@@ -398,7 +407,7 @@ export async function discoverRelatedFiles(
   aiConfig: AiConfig,
   input: RelatedFilesInput,
 ): Promise<Result<RawRelatedFile[]>> {
-  const messages = buildRelatedFilesPrompt(input);
+  const messages = buildRelatedFilesPrompt(input, getCustomPrompt(aiConfig, 'relatedFiles'));
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'relatedFiles');
   const temperature = getTemperature(aiConfig, 'relatedFiles');
@@ -434,7 +443,7 @@ export async function generateFollowUp(
   input: FollowUpInput,
   commentId: string,
 ): Promise<Result<FollowUpAnalysis>> {
-  const messages = buildFollowUpPrompt(input);
+  const messages = buildFollowUpPrompt(input, getCustomPrompt(aiConfig, 'followUp'));
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'followUp');
   const temperature = getTemperature(aiConfig, 'followUp');

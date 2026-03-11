@@ -37,6 +37,8 @@ Guidelines:
 - If no related files are worth examining, return an empty array.
 - Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
 
+export const DEFAULT_RELATED_FILES_PROMPT = SYSTEM_PROMPT;
+
 export type RelatedFilesInput = {
   diffFiles: DiffFileData[];
   imports: Record<string, string[]>;  // filePath → imported paths
@@ -44,7 +46,7 @@ export type RelatedFilesInput = {
   mrTitle: string;
 };
 
-export function buildRelatedFilesPrompt(input: RelatedFilesInput): ChatMessage[] {
+export function buildRelatedFilesPrompt(input: RelatedFilesInput, customSystemPrompt?: string): ChatMessage[] {
   const changedFiles = input.diffFiles.map((f) => {
     const status = f.isNew ? '[NEW]' : f.isDeleted ? '[DELETED]' : f.isRenamed ? '[RENAMED]' : '[MODIFIED]';
     return `${status} ${f.filePath} (+${f.addedLines} -${f.removedLines})`;
@@ -83,7 +85,7 @@ ${importMap || '(No imports detected)'}
 ${fileTreeStr}`;
 
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: customSystemPrompt || SYSTEM_PROMPT },
     { role: 'user', content: userContent },
   ];
 }

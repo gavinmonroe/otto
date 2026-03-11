@@ -33,6 +33,7 @@ import langGo from 'shiki/langs/go.mjs';
 import langRust from 'shiki/langs/rust.mjs';
 import langJava from 'shiki/langs/java.mjs';
 import langRuby from 'shiki/langs/ruby.mjs';
+import langCsharp from 'shiki/langs/csharp.mjs';
 import langBash from 'shiki/langs/bash.mjs';
 import langSql from 'shiki/langs/sql.mjs';
 import langMarkdown from 'shiki/langs/markdown.mjs';
@@ -50,7 +51,7 @@ function getHighlighter(): Promise<HighlighterCore> {
         langTypescript, langTsx, langJavascript, langJsx,
         langJson, langYaml, langHtml, langCss,
         langPython, langGo, langRust, langJava, langRuby,
-        langBash, langSql, langMarkdown,
+        langCsharp, langBash, langSql, langMarkdown,
       ],
       engine: createJavaScriptRegexEngine(),
     });
@@ -76,6 +77,7 @@ export function extToLang(filePath: string): string | null {
     go: 'go',
     rs: 'rust',
     java: 'java',
+    cs: 'csharp', csx: 'csharp',
     sh: 'bash', bash: 'bash', zsh: 'bash',
     sql: 'sql',
     md: 'markdown', mdx: 'markdown',

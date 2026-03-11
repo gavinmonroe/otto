@@ -47,6 +47,8 @@ Guidelines:
 - It's okay to return an empty comments array if the changes look good.
 - Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
 
+export const DEFAULT_CODE_REVIEW_PROMPT = SYSTEM_PROMPT;
+
 export type CodeReviewInput = {
   file: DiffFileData;
   fullFileContent: string | null;  // Content from target branch for context
@@ -58,7 +60,7 @@ export type CodeReviewInput = {
   callerSnippets: Array<{ filePath: string; snippet: string }> | null;
 };
 
-export function buildCodeReviewPrompt(input: CodeReviewInput): ChatMessage[] {
+export function buildCodeReviewPrompt(input: CodeReviewInput, customSystemPrompt?: string): ChatMessage[] {
   let userContent = `# File: ${input.file.filePath}
 
 **MR:** ${input.mrTitle}
@@ -101,7 +103,7 @@ ${input.mrDescription}`;
   }
 
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: customSystemPrompt || SYSTEM_PROMPT },
     { role: 'user', content: userContent },
   ];
 }
