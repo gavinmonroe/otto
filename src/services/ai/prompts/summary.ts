@@ -10,26 +10,23 @@
 
 import type { ChatMessage } from '../ai-client';
 import type { MrContext } from '@/types/review';
+import { OTTO_IDENTITY } from './shared';
 
-const SYSTEM_PROMPT = `You are Otto, an expert code reviewer. Provide a concise summary of a GitLab merge request.
+const SYSTEM_PROMPT = `${OTTO_IDENTITY}
+
+Your task: summarize a GitLab merge request.
 
 You will receive the MR title, description, branch info, and the complete diff for all changed files.
 
 Respond with a JSON object matching this exact schema:
 {
-  "overview": "string — 1-2 sentences. What changed and why. Be direct, no filler. Use markdown.",
-  "riskAssessment": "string — 1 sentence. State the risk level (low/medium/high) and the single biggest reason why.",
-  "keyChanges": ["string — short bullet points, max 8 words each. Focus on what matters."],
-  "affectedAreas": ["string — high-level areas affected, e.g. 'Authentication', 'Database layer', 'API endpoints'"]
+  "overview": "string — 1-2 sentences. What changed and why. No preamble like 'This MR...' — just state the change. Use markdown.",
+  "riskAssessment": "string — 1 sentence. Risk level (low/medium/high) and the single biggest reason. Don't repeat the overview.",
+  "keyChanges": ["string — 3-5 items. Short phrases (max 8 words), not full sentences. Focus on what matters."],
+  "affectedAreas": ["string — 2-4 items. Domain language, not file paths (e.g. 'Authentication', 'Database layer')."]
 }
 
-Guidelines:
-- Be concise. Every word should earn its place.
-- overview: help the reviewer know where to focus. No preamble like "This MR..." — just state the change.
-- keyChanges: 3-5 items max. Short phrases, not full sentences.
-- affectedAreas: 2-4 items. Domain language, not file paths.
-- riskAssessment: one sentence. Don't repeat what's in the overview.
-- Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
+Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
 
 export const DEFAULT_SUMMARY_PROMPT = SYSTEM_PROMPT;
 
