@@ -60,14 +60,14 @@ export type EnrichedContext = {
  * @param host - GitLab host config
  * @param projectId - Numeric project ID
  * @param diffFiles - Changed files from the MR
- * @param targetBranch - Target branch ref for fetching file contents
+ * @param sourceBranch - Source branch ref for fetching file contents
  * @param fileTree - Pre-fetched file tree (if available)
  */
 export async function buildEnrichedContext(
   host: HostConfig,
   projectId: number,
   diffFiles: DiffFileData[],
-  targetBranch: string,
+  sourceBranch: string,
   fileTree?: GitLabTreeItem[],
 ): Promise<EnrichedContext> {
   // Get the full file tree if not provided
@@ -75,7 +75,7 @@ export async function buildEnrichedContext(
   if (fileTree) {
     allFiles = fileTree.filter((f) => f.type === 'blob').map((f) => f.path);
   } else {
-    const treeResult = await gitlab.fetchFileTree(host, projectId, targetBranch, undefined, true);
+    const treeResult = await gitlab.fetchFileTree(host, projectId, sourceBranch, undefined, true);
     allFiles = treeResult.ok
       ? treeResult.data.filter((f) => f.type === 'blob').map((f) => f.path)
       : [];
@@ -93,7 +93,7 @@ export async function buildEnrichedContext(
     const batch = nonDeletedFiles.slice(i, i + contentBatchSize);
     const promises = batch.map(async (file) => {
       // Fetch from source branch (the new version)
-      const result = await gitlab.fetchFileContent(host, projectId, file.filePath, targetBranch);
+      const result = await gitlab.fetchFileContent(host, projectId, file.filePath, sourceBranch);
       if (result.ok) {
         changedFileContents.set(file.filePath, result.data);
       }
@@ -144,7 +144,7 @@ export async function buildEnrichedContext(
   for (let i = 0; i < candidates.length; i += contentBatchSize) {
     const batch = candidates.slice(i, i + contentBatchSize);
     const promises = batch.map(async (filePath) => {
-      const result = await gitlab.fetchFileContent(host, projectId, filePath, targetBranch);
+      const result = await gitlab.fetchFileContent(host, projectId, filePath, sourceBranch);
       if (result.ok) {
         candidateContents.set(filePath, result.data);
       }

@@ -59,27 +59,27 @@ export async function executeReview(
   // Wait for context + tickets, then launch remaining tasks
   const remainingTasks = Promise.all([contextReady, ticketContextReady]).then(
     async ([{ fileContents, fileTreePaths, enrichedContext }, ticketContext]) => {
-    const remaining: Promise<void>[] = [];
+      const remaining: Promise<void>[] = [];
 
-    if (tasks.includes('codeReview')) {
-      send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${context.diffFiles.length} changed files...` } });
-      remaining.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, ticketContext, host, send));
-    }
+      if (tasks.includes('codeReview')) {
+        send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${context.diffFiles.length} changed files...` } });
+        remaining.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, ticketContext, host, send));
+      }
 
-    if (tasks.includes('edgeCases')) {
-      send({ type: 'STREAM_PROGRESS', payload: { message: 'Analyzing edge cases...' } });
-      remaining.push(runEdgeCasesTask(context, settings, fileContents, ticketContext, send));
-    }
+      if (tasks.includes('edgeCases')) {
+        send({ type: 'STREAM_PROGRESS', payload: { message: 'Analyzing edge cases...' } });
+        remaining.push(runEdgeCasesTask(context, settings, fileContents, ticketContext, send));
+      }
 
-    if (tasks.includes('relatedFiles')) {
-      send({ type: 'STREAM_PROGRESS', payload: { message: 'Discovering related files...' } });
-      remaining.push(
-        runRelatedFilesTask(context, settings, fileContents, fileTreePaths, host, send),
-      );
-    }
+      if (tasks.includes('relatedFiles')) {
+        send({ type: 'STREAM_PROGRESS', payload: { message: 'Discovering related files...' } });
+        remaining.push(
+          runRelatedFilesTask(context, settings, fileContents, fileTreePaths, host, send),
+        );
+      }
 
-    await Promise.all(remaining);
-  });
+      await Promise.all(remaining);
+    });
 
   taskPromises.push(remainingTasks);
 
@@ -120,12 +120,12 @@ async function prepareContext(
 
   if (contentTasks.length > 0) {
     try {
-      send({ type: 'STREAM_PROGRESS', payload: { message: `Fetching ${contentTasks.length} file(s) from target branch...` } });
+      send({ type: 'STREAM_PROGRESS', payload: { message: `Fetching ${contentTasks.length} file(s) from source branch...` } });
       const contents = await repoService.fetchMultipleFiles(
         host,
         context.projectId,
         contentTasks,
-        context.targetBranch,
+        context.sourceBranch,
       );
       for (const [path, content] of contents) {
         if (content) fileContents.set(path, content);
@@ -140,7 +140,7 @@ async function prepareContext(
     const treeResult = await repoService.getFullFileTree(
       host,
       context.projectId,
-      context.targetBranch,
+      context.sourceBranch,
     );
     if (treeResult.ok) {
       fileTreePaths = treeResult.data
@@ -154,7 +154,7 @@ async function prepareContext(
           host,
           context.projectId,
           context.diffFiles,
-          context.targetBranch,
+          context.sourceBranch,
           treeResult.data,
         );
       } catch {
@@ -381,7 +381,7 @@ async function runCodeReviewTask(
               const callersToFetch = fileCtx.importedBy.slice(0, 3); // Cap at 3
               for (const callerPath of callersToFetch) {
                 const callerResult = await gitlab.fetchFileContent(
-                  host, context.projectId, callerPath, context.targetBranch,
+                  host, context.projectId, callerPath, context.sourceBranch,
                 );
                 if (callerResult.ok) {
                   // Truncate to first 100 lines to keep prompt size reasonable
@@ -510,7 +510,7 @@ async function runRelatedFilesTask(
         host,
         context.projectId,
         filePaths,
-        context.targetBranch,
+        context.sourceBranch,
       );
 
       for (const rawFile of result.data) {

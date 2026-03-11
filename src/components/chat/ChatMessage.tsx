@@ -13,7 +13,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTheme } from '@/components/ThemeContext';
 import type { OttoTheme } from '@/components/ThemeContext';
-import { Markdown } from '@/components/Markdown';
+import { Markdown, ShikiCodeBlock, extractText } from '@/components/Markdown';
 import { DiffReference } from './DiffReference';
 import { convertRefsToMarkdownLinks, parseOttoRefUrl, stripFileRefSyntax } from '@/lib/file-reference-parser';
 import type { ChatMessage as ChatMessageType } from '@/types/chat';
@@ -189,17 +189,9 @@ function buildChatComponents(t: OttoTheme): Components {
     code: ({ children, className }) => {
       const isBlock = className?.startsWith('language-');
       if (isBlock) {
-        return (
-          <code style={{
-            display: 'block',
-            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-            fontSize: '12px',
-            lineHeight: '1.5',
-            color: t.isDark ? '#e2e8f0' : '#334155',
-          }}>
-            {children}
-          </code>
-        );
+        const lang = className?.replace('language-', '') || '';
+        const code = extractText(children);
+        return <ShikiCodeBlock code={code} lang={lang} theme={t} />;
       }
       return (
         <code style={{

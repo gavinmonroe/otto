@@ -205,20 +205,20 @@ export type MessageResponseMap = {
 
 export type StreamRequest =
   | {
-      type: 'STREAM_REVIEW';
-      payload: {
-        mrContext: MrContext;
-        tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'>;
-      };
-    }
-  | {
-      type: 'STREAM_CHAT';
-      payload: {
-        question: string;
-        history: ChatMessage[];
-        reviewContext: ChatReviewContext;
-      };
+    type: 'STREAM_REVIEW';
+    payload: {
+      mrContext: MrContext;
+      tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'>;
     };
+  }
+  | {
+    type: 'STREAM_CHAT';
+    payload: {
+      question: string;
+      history: ChatMessage[];
+      reviewContext: ChatReviewContext;
+    };
+  };
 
 /**
  * Snapshot of review data passed to the chat AI for context.

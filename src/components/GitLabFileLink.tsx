@@ -85,7 +85,7 @@ export function GitLabFileLink({
         hostId: hostResult.data.id,
         projectId: mrContext.projectId,
         filePath,
-        ref: mrContext.targetBranch || 'main',
+        ref: mrContext.sourceBranch || 'main',
       },
     });
 

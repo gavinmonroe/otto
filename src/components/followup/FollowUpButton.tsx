@@ -101,9 +101,9 @@ export function FollowUpButton({ noteElement, onTogglePanel }: FollowUpButtonPro
       style={s.button}
       title={
         status === 'error' ? `Error: ${error}`
-        : status === 'loading' ? 'Analyzing comment...'
-        : status === 'complete' ? 'Show follow-up analysis'
-        : 'Analyze this comment with Otto'
+          : status === 'loading' ? 'Analyzing comment...'
+            : status === 'complete' ? 'Show follow-up analysis'
+              : 'Analyze this comment with Otto'
       }
       disabled={status === 'loading'}
       aria-label="Otto follow-up"

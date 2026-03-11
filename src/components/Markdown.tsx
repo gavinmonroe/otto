@@ -219,7 +219,7 @@ function buildComponents(t: OttoTheme, compact: boolean): Components {
 // ShikiCodeBlock — async syntax-highlighted code block
 // ---------------------------------------------------------------------------
 
-function ShikiCodeBlock({ code, lang, theme }: { code: string; lang: string; theme: OttoTheme }) {
+export function ShikiCodeBlock({ code, lang, theme }: { code: string; lang: string; theme: OttoTheme }) {
   const [html, setHtml] = useState<string | null>(null);
 
   useEffect(() => {
@@ -252,7 +252,7 @@ function ShikiCodeBlock({ code, lang, theme }: { code: string; lang: string; the
 // Extract plain text from React children (react-markdown passes nodes)
 // ---------------------------------------------------------------------------
 
-function extractText(children: React.ReactNode): string {
+export function extractText(children: React.ReactNode): string {
   if (typeof children === 'string') return children;
   if (Array.isArray(children)) return children.map(extractText).join('');
   if (children && typeof children === 'object' && 'props' in children) {
