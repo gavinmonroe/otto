@@ -60,17 +60,23 @@ export function startRelatedFilesSidebar(isDarkMode: boolean, signal?: AbortSign
   });
 
   // Also observe DOM for sidebar appearing (GitLab lazy-loads it)
+  let sidebarScanTimer: ReturnType<typeof setTimeout> | null = null;
+
   const observer = new MutationObserver(() => {
     if (injected) return;
-    const state = useReviewStore.getState();
-    if (state.relatedFiles.length === 0) return;
+    if (sidebarScanTimer) return;
+    sidebarScanTimer = setTimeout(() => {
+      sidebarScanTimer = null;
+      const state = useReviewStore.getState();
+      if (state.relatedFiles.length === 0) return;
 
-    const sidebarEl = findSidebar();
-    if (sidebarEl) {
-      injectSidebar(sidebarEl, isDarkMode);
-      injected = true;
-      observer.disconnect();
-    }
+      const sidebarEl = findSidebar();
+      if (sidebarEl) {
+        injectSidebar(sidebarEl, isDarkMode);
+        injected = true;
+        observer.disconnect();
+      }
+    }, 200);
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
@@ -78,6 +84,7 @@ export function startRelatedFilesSidebar(isDarkMode: boolean, signal?: AbortSign
   function cleanup() {
     unsubscribe();
     observer.disconnect();
+    if (sidebarScanTimer) clearTimeout(sidebarScanTimer);
     if (sidebarRoot) {
       sidebarRoot.unmount();
       sidebarRoot = null;

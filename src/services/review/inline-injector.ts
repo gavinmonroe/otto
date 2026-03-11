@@ -11,6 +11,8 @@
 // - Handles both inline (unified) and parallel diff views.
 // - Retries failed injections when new DOM elements appear (handles cache
 //   hydration where reviews arrive before diff elements are rendered).
+// - MutationObserver is debounced to prevent cascading DOM thrashing.
+// - Status subscription only re-renders comments whose status changed.
 // ---------------------------------------------------------------------------
 
 import { createElement } from 'react';
@@ -24,7 +26,7 @@ import type { ReviewComment, ReviewCommentStatus } from '@/types/review';
 const INJECTED_ATTR = 'data-otto-inline-comment';
 
 /** Track mounted inline comments for cleanup */
-const mountedComments = new Map<string, { root: Root; container: HTMLElement }>();
+const mountedComments = new Map<string, { root: Root; container: HTMLElement; lastStatus: ReviewCommentStatus }>();
 
 /** Track comments that failed to inject because the DOM wasn't ready */
 const pendingComments = new Map<string, ReviewComment>();
@@ -67,36 +69,46 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
     }
   });
 
-  // Also subscribe to comment status changes to update opacity / remove dismissed
+  // Subscribe to comment status changes ONLY — skip re-renders unless
+  // a comment's status actually changed. This prevents the O(n*m) re-render
+  // storm that was crashing tabs on large MRs.
   const statusUnsubscribe = useReviewStore.subscribe((state) => {
     for (const fileReview of state.fileReviews) {
       for (const comment of fileReview.comments) {
         const mounted = mountedComments.get(comment.id);
-        if (mounted) {
-          // Re-render with updated status
-          mounted.root.render(
-            createElement(ThemeProvider, {
-              isDark: isDarkMode,
-              children: createElement(OttoErrorBoundary, { name: 'InlineComment' },
-                createElement(InlineCommentThread, {
-                  comment,
-                  onUpdateStatus: handleUpdateStatus,
-                }),
-              ),
-            }),
-          );
-        }
+        if (!mounted) continue;
+
+        // Only re-render if the status actually changed
+        if (mounted.lastStatus === comment.status) continue;
+        mounted.lastStatus = comment.status;
+
+        mounted.root.render(
+          createElement(ThemeProvider, {
+            isDark: isDarkMode,
+            children: createElement(OttoErrorBoundary, { name: 'InlineComment' },
+              createElement(InlineCommentThread, {
+                comment,
+                onUpdateStatus: handleUpdateStatus,
+              }),
+            ),
+          }),
+        );
       }
     }
   });
 
   // Watch for new diff file elements appearing in the DOM.
-  // When cache hydration happens before diff elements are rendered,
-  // comments go into pendingComments. This observer retries them
-  // when new .diff-file elements appear.
+  // Debounced to prevent cascading mutation storms when GitLab renders
+  // many diff files at once (e.g., scrolling through a 19-file MR).
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
   const domObserver = new MutationObserver(() => {
     if (pendingComments.size === 0) return;
-    retryPendingComments(isDarkMode);
+    if (retryTimer) return; // Already scheduled
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      retryPendingComments(isDarkMode);
+    }, 150);
   });
 
   const container = document.querySelector('.diff-files-holder') || document.body;
@@ -106,6 +118,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
     unsubscribe();
     statusUnsubscribe();
     domObserver.disconnect();
+    if (retryTimer) clearTimeout(retryTimer);
     // Unmount all inline comments
     for (const [id, { root, container }] of mountedComments) {
       root.unmount();
@@ -196,7 +209,7 @@ function injectInlineComment(comment: ReviewComment, isDarkMode: boolean): void 
     }),
   );
 
-  mountedComments.set(comment.id, { root, container });
+  mountedComments.set(comment.id, { root, container, lastStatus: comment.status });
 }
 
 /**

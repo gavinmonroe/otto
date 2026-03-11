@@ -45,8 +45,15 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
   scanAndInjectButtons(isDarkMode);
 
   // Watch for new notes (lazy-loaded discussions, tab switches)
+  // Debounced to prevent cascading mutation storms on large MRs.
+  let scanTimer: ReturnType<typeof setTimeout> | null = null;
+
   const observer = new MutationObserver(() => {
-    scanAndInjectButtons(isDarkMode);
+    if (scanTimer) return;
+    scanTimer = setTimeout(() => {
+      scanTimer = null;
+      scanAndInjectButtons(isDarkMode);
+    }, 200);
   });
 
   observer.observe(document.body, {
@@ -67,6 +74,7 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
   function cleanup() {
     observer.disconnect();
     storeUnsubscribe();
+    if (scanTimer) clearTimeout(scanTimer);
 
     for (const [id, { root, container }] of mountedButtons) {
       root.unmount();
