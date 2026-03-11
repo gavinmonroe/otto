@@ -27,7 +27,8 @@ Respond with a JSON object matching this exact schema:
       "category": "bug" | "logic-error" | "security" | "performance" | "readability" | "style" | "error-handling" | "naming" | "duplication" | "other",
       "title": "string — one-line summary of the issue",
       "body": "string — detailed explanation with reasoning. Use markdown.",
-      "suggestion": "string | null — suggested code fix if applicable, as a code snippet"
+      "originalCode": "string | null — the exact original code being replaced, copied verbatim from the diff/file",
+      "suggestion": "string | null — suggested replacement code if applicable"
     }
   ]
 }
@@ -38,6 +39,8 @@ Guidelines:
 - Don't nitpick style unless it significantly impacts readability.
 - Each comment should explain WHY something is a problem, not just WHAT is wrong.
 - Suggestions should be concrete code snippets, not vague advice.
+- When providing a suggestion, ALWAYS include originalCode with the exact code being replaced (copied from the diff or file). This enables a diff view in the UI.
+- originalCode and suggestion should be pure code — no markdown fences, no diff markers.
 - For new files, review the overall design and structure.
 - For deleted files, note if there might be remaining references.
 - Order comments by severity (critical first).

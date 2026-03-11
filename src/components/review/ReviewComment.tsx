@@ -6,6 +6,7 @@
 import type { ReviewComment as ReviewCommentType, ReviewCommentStatus } from '@/types/review';
 import { useTheme } from '@/components/ThemeContext';
 import { Markdown } from '@/components/Markdown';
+import { SuggestionDiff } from '@/components/SuggestionDiff';
 import { ReviewActions } from './ReviewActions';
 
 type ReviewCommentProps = {
@@ -57,7 +58,15 @@ export function ReviewComment({ comment, onUpdateStatus }: ReviewCommentProps) {
       </div>
       {comment.suggestion && (
         <div style={{ fontSize: '12px' }}>
-          <Markdown content={`\`\`\`\n${comment.suggestion}\n\`\`\``} compact />
+          {comment.originalCode ? (
+            <SuggestionDiff
+              originalCode={comment.originalCode}
+              suggestion={comment.suggestion}
+              startLine={comment.startLine}
+            />
+          ) : (
+            <Markdown content={`\`\`\`\n${comment.suggestion}\n\`\`\``} compact />
+          )}
         </div>
       )}
       <ReviewActions comment={comment} onUpdateStatus={onUpdateStatus} />

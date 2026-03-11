@@ -140,6 +140,7 @@ type RawFileReview = {
     category: ReviewComment['category'];
     title: string;
     body: string;
+    originalCode: string | null;
     suggestion: string | null;
   }>;
 };
@@ -193,6 +194,7 @@ export async function generateFileReview(
       category: c.category,
       title: c.title,
       body: c.body,
+      originalCode: c.originalCode ?? null,
       suggestion: c.suggestion,
       status: 'pending' as const,
       editedBody: null,

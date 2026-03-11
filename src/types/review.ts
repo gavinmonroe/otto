@@ -36,6 +36,7 @@ export type ReviewComment = {
   category: ReviewCommentCategory;
   title: string;               // One-line summary
   body: string;                // Detailed explanation (markdown)
+  originalCode: string | null; // Code being replaced (for diff view)
   suggestion: string | null;   // Suggested code fix, if applicable
   status: ReviewCommentStatus;
   editedBody: string | null;   // User's edited version, if status === 'edited'

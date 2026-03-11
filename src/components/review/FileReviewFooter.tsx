@@ -16,6 +16,7 @@ import { useReviewStore } from '@/services/review/review-store';
 import { useTheme } from '@/components/ThemeContext';
 import type { OttoTheme } from '@/components/ThemeContext';
 import { Markdown } from '@/components/Markdown';
+import { SuggestionDiff } from '@/components/SuggestionDiff';
 import { ReviewActions } from './ReviewActions';
 import { OttoLogo } from '@/components/OttoLogo';
 import type { ReviewComment as ReviewCommentType, ReviewCommentStatus } from '@/types/review';
@@ -47,13 +48,21 @@ export function FileReviewFooter({ filePath }: FileReviewFooterProps) {
 
   return (
     <div style={s.container}>
-      {/* Streaming indicator */}
+      {/* Streaming indicator + live delta */}
       {isStreaming && (
-        <div style={s.streamingRow}>
-          <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-          <span>Otto is reviewing this file...</span>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
+        <>
+          <div style={s.streamingRow}>
+            <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>Otto is reviewing this file...</span>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+          {fileReviewDelta && (
+            <div style={s.streamingBody}>
+              <Markdown content={fileReviewDelta} compact />
+              <span style={{ color: theme.brand }}>|</span>
+            </div>
+          )}
+        </>
       )}
 
       {/* File summary header */}
@@ -163,7 +172,15 @@ function CommentRow({
               <div style={{ fontSize: '11px', fontWeight: 600, color: theme.textSecondary, marginBottom: '4px' }}>
                 Suggested fix
               </div>
-              <Markdown content={`\`\`\`\n${comment.suggestion}\n\`\`\``} compact />
+              {comment.originalCode ? (
+                <SuggestionDiff
+                  originalCode={comment.originalCode}
+                  suggestion={comment.suggestion}
+                  startLine={comment.startLine}
+                />
+              ) : (
+                <Markdown content={`\`\`\`\n${comment.suggestion}\n\`\`\``} compact />
+              )}
             </div>
           )}
 
@@ -222,6 +239,14 @@ function buildStyles(t: OttoTheme) {
       fontSize: '12px',
       color: t.brand,
       borderBottom: `1px solid ${t.borderSubtle}`,
+    } as React.CSSProperties,
+
+    streamingBody: {
+      padding: '8px 14px',
+      fontSize: '13px',
+      color: t.text,
+      borderBottom: `1px solid ${t.borderSubtle}`,
+      whiteSpace: 'pre-wrap' as const,
     } as React.CSSProperties,
 
     summaryRow: {

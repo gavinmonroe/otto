@@ -169,12 +169,25 @@ export function MrOverviewPanel() {
       )}
 
       {/* Edge Cases (collapsible) */}
-      {review.edgeCases.length > 0 && (
+      {(review.edgeCases.length > 0 || review.edgeCasesDelta) && (
         <div style={s.section}>
           <button onClick={() => setShowEdgeCases(!showEdgeCases)} style={s.collapsibleHeader}>
-            <span>{showEdgeCases ? '▾' : '▸'} Edge Cases ({review.edgeCases.length})</span>
+            <span>
+              {showEdgeCases ? '▾' : '▸'} Edge Cases
+              {review.edgeCases.length > 0
+                ? ` (${review.edgeCases.length})`
+                : review.edgeCasesDelta ? ' (analyzing...)' : ''}
+            </span>
           </button>
-          {showEdgeCases && <EdgeCaseAnalysis edgeCases={review.edgeCases} />}
+          {showEdgeCases && review.edgeCases.length > 0 && (
+            <EdgeCaseAnalysis edgeCases={review.edgeCases} />
+          )}
+          {showEdgeCases && !review.edgeCases.length && review.edgeCasesDelta && (
+            <div style={{ fontSize: '13px', marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+              <Markdown content={review.edgeCasesDelta} compact />
+              <span style={{ color: theme.brand }}>|</span>
+            </div>
+          )}
         </div>
       )}
     </div>
