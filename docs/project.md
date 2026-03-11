@@ -85,13 +85,14 @@ otto/
 │   │   └── gitlab-mr.content/             # Content script for MR diffs
 │   │       ├── index.tsx                   # Entry: detection, observer, mount
 │   │       ├── App.tsx                     # Root injected component
-│   │       ├── index.tsx                   # Entry: detection, observer, mount
 │   │       └── style.css                   # Tailwind entry for shadow DOM
 │   │
 │   ├── components/                         # Shared React components
 │   │   ├── OttoLogo.tsx                    # Brand logo (currentColor for dark mode)
 │   │   ├── Markdown.tsx                    # Markdown renderer (react-markdown + GFM)
 │   │   ├── ThemeContext.tsx                # Dark/light theme provider + useTheme hook
+│   │   ├── GitLabFileLink.tsx              # Clickable file links + inline preview
+│   │   ├── SuggestionDiff.tsx              # Unified diff view for code suggestions
 │   │   ├── ui/                             # shadcn/ui primitives (button, card, etc.)
 │   │   ├── review/                         # Review-specific components
 │   │   │   ├── MrOverviewPanel.tsx         # Summary banner above diffs
@@ -119,7 +120,8 @@ otto/
 │   │   │   ├── gitlab-client.ts            # GitLab REST API v4 typed client
 │   │   │   ├── mr-parser.ts               # Extracts MR context from DOM + API
 │   │   │   ├── diff-parser.ts             # Parses structured diff data from DOM
-│   │   │   └── repo-service.ts            # File tree, file content, blame
+│   │   │   ├── repo-service.ts            # File tree, file content, blame
+│   │   │   └── context-enrichment.ts      # Reverse imports, callers, exported symbols
 │   │   └── review/
 │   │       ├── review-orchestrator.ts      # Coordinates the full review pipeline
 │   │       ├── review-store.ts            # Zustand store for review state
