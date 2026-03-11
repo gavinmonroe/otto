@@ -19,6 +19,8 @@ import { MrOverviewPanel } from '@/components/review/MrOverviewPanel';
 import { FileReviewCard } from '@/components/review/FileReviewCard';
 import { FileReviewFooter } from '@/components/review/FileReviewFooter';
 import { ThemeProvider } from '@/components/ThemeContext';
+import { startInlineCommentInjection } from '@/services/review/inline-injector';
+import { startRelatedFilesSidebar } from '@/services/review/sidebar-injector';
 import { createElement } from 'react';
 import type { ReviewTask } from '@/services/review/review-types';
 
@@ -47,6 +49,12 @@ export default defineContentScript({
       mountFileReviewCard(ctx, fileElement, filePath, isDarkMode);
       mountFileReviewFooter(ctx, fileElement, filePath, isDarkMode);
     }, ctx.signal);
+
+    // Inject inline comments next to diff lines as reviews complete
+    startInlineCommentInjection(isDarkMode, ctx.signal);
+
+    // Inject related files into GitLab's sidebar file tree
+    startRelatedFilesSidebar(isDarkMode, ctx.signal);
 
     // Auto-review if the preference is enabled
     await maybeAutoReview(mrContext);

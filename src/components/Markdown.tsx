@@ -12,11 +12,13 @@
 // - Compact styling to fit within the diff page context
 // ---------------------------------------------------------------------------
 
+import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTheme } from '@/components/ThemeContext';
 import type { OttoTheme } from '@/components/ThemeContext';
 import type { Components } from 'react-markdown';
+import { highlight } from '@/services/syntax/highlighter';
 
 type MarkdownProps = {
   content: string;
@@ -70,17 +72,8 @@ function buildComponents(t: OttoTheme, compact: boolean): Components {
       const isBlock = className?.startsWith('language-');
       if (isBlock) {
         const lang = className?.replace('language-', '') || '';
-        return (
-          <code style={{
-            display: 'block',
-            fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Menlo, Monaco, "Courier New", monospace',
-            fontSize: '12px',
-            lineHeight: '1.5',
-            color: t.isDark ? '#e2e8f0' : '#334155',
-          }}>
-            {children}
-          </code>
-        );
+        const code = extractText(children);
+        return <ShikiCodeBlock code={code} lang={lang} theme={t} />;
       }
       // Inline code
       return (
@@ -220,4 +213,50 @@ function buildComponents(t: OttoTheme, compact: boolean): Components {
       }} />
     ),
   };
+}
+
+// ---------------------------------------------------------------------------
+// ShikiCodeBlock — async syntax-highlighted code block
+// ---------------------------------------------------------------------------
+
+function ShikiCodeBlock({ code, lang, theme }: { code: string; lang: string; theme: OttoTheme }) {
+  const [html, setHtml] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    highlight(code, lang || null, theme.isDark).then((result) => {
+      if (!cancelled) setHtml(result);
+    });
+    return () => { cancelled = true; };
+  }, [code, lang, theme.isDark]);
+
+  if (html) {
+    return <div dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+
+  // Fallback while Shiki loads
+  return (
+    <code style={{
+      display: 'block',
+      fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Menlo, Monaco, "Courier New", monospace',
+      fontSize: '12px',
+      lineHeight: '1.5',
+      color: theme.isDark ? '#e2e8f0' : '#334155',
+    }}>
+      {code}
+    </code>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Extract plain text from React children (react-markdown passes nodes)
+// ---------------------------------------------------------------------------
+
+function extractText(children: React.ReactNode): string {
+  if (typeof children === 'string') return children;
+  if (Array.isArray(children)) return children.map(extractText).join('');
+  if (children && typeof children === 'object' && 'props' in children) {
+    return extractText((children as React.ReactElement<{ children?: React.ReactNode }>).props.children);
+  }
+  return String(children ?? '');
 }

@@ -176,6 +176,7 @@ function CommentRow({
                 <SuggestionDiff
                   originalCode={comment.originalCode}
                   suggestion={comment.suggestion}
+                  filePath={comment.filePath}
                   startLine={comment.startLine}
                 />
               ) : (

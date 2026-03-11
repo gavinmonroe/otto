@@ -1,18 +1,22 @@
 // ---------------------------------------------------------------------------
-// SuggestionDiff — lightweight unified diff view for code suggestions.
+// SuggestionDiff — unified diff view with Shiki syntax highlighting.
 //
-// Renders original vs suggested code side-by-side in a single unified view
-// with red (removed) and green (added) line highlighting, matching the
-// familiar git diff / GitLab MR diff style.
+// Renders original vs suggested code in a unified view with red (removed)
+// and green (added) line backgrounds, plus proper syntax coloring via Shiki.
 //
-// No external dependencies — just inline styles + ThemeContext.
+// The diff computation (LCS) is synchronous. Syntax highlighting is async
+// and renders progressively — plain text first, then colored once Shiki loads.
 // ---------------------------------------------------------------------------
 
+import { useState, useEffect, useMemo } from 'react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
+import { highlightLines, extToLang } from '@/services/syntax/highlighter';
 
 type SuggestionDiffProps = {
   originalCode: string;
   suggestion: string;
+  /** File path — used to detect language for syntax highlighting */
+  filePath?: string;
   /** Starting line number for the original code (for gutter display) */
   startLine?: number | null;
 };
@@ -24,17 +28,36 @@ type DiffLine = {
   newLineNo: number | null;
 };
 
-export function SuggestionDiff({ originalCode, suggestion, startLine }: SuggestionDiffProps) {
+export function SuggestionDiff({ originalCode, suggestion, filePath, startLine }: SuggestionDiffProps) {
   const theme = useTheme();
-  const diffLines = computeUnifiedDiff(originalCode, suggestion, startLine ?? 1);
+  const diffLines = useMemo(
+    () => computeUnifiedDiff(originalCode, suggestion, startLine ?? 1),
+    [originalCode, suggestion, startLine],
+  );
+
+  // Async syntax highlighting
+  const [highlightedHtml, setHighlightedHtml] = useState<string[] | null>(null);
+  const lang = filePath ? extToLang(filePath) : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    const plainLines = diffLines.map((l) => l.content);
+
+    highlightLines(plainLines, lang, theme.isDark).then((html) => {
+      if (!cancelled) setHighlightedHtml(html);
+    });
+
+    return () => { cancelled = true; };
+  }, [diffLines, lang, theme.isDark]);
 
   if (diffLines.length === 0) return null;
 
   const s = buildStyles(theme);
-  const gutterWidth = Math.max(
+  const maxLineNo = Math.max(
     ...diffLines.map((l) => l.oldLineNo ?? 0),
     ...diffLines.map((l) => l.newLineNo ?? 0),
-  ).toString().length;
+  );
+  const gutterWidth = maxLineNo.toString().length;
 
   return (
     <div style={s.container}>
@@ -54,7 +77,14 @@ export function SuggestionDiff({ originalCode, suggestion, startLine }: Suggesti
             <span style={s.marker}>
               {line.type === 'removed' ? '-' : line.type === 'added' ? '+' : ' '}
             </span>
-            <span style={s.code}>{line.content}</span>
+            {highlightedHtml ? (
+              <span
+                style={s.code}
+                dangerouslySetInnerHTML={{ __html: highlightedHtml[i] }}
+              />
+            ) : (
+              <span style={s.code}>{line.content}</span>
+            )}
           </div>
         ))}
       </div>
@@ -74,7 +104,6 @@ function computeUnifiedDiff(
   const oldLines = original.split('\n');
   const newLines = suggested.split('\n');
 
-  // Simple LCS to find matching lines
   const lcs = computeLCS(oldLines, newLines);
   const result: DiffLine[] = [];
 
@@ -84,61 +113,31 @@ function computeUnifiedDiff(
   let newLineNo = baseLineNo;
 
   for (const match of lcs) {
-    // Lines removed before this match
     while (oldIdx < match.oldIdx) {
-      result.push({
-        type: 'removed',
-        content: oldLines[oldIdx],
-        oldLineNo: oldLineNo,
-        newLineNo: null,
-      });
+      result.push({ type: 'removed', content: oldLines[oldIdx], oldLineNo, newLineNo: null });
       oldIdx++;
       oldLineNo++;
     }
-    // Lines added before this match
     while (newIdx < match.newIdx) {
-      result.push({
-        type: 'added',
-        content: newLines[newIdx],
-        oldLineNo: null,
-        newLineNo: newLineNo,
-      });
+      result.push({ type: 'added', content: newLines[newIdx], oldLineNo: null, newLineNo });
       newIdx++;
       newLineNo++;
     }
-    // Context line (matching)
-    result.push({
-      type: 'context',
-      content: oldLines[oldIdx],
-      oldLineNo: oldLineNo,
-      newLineNo: newLineNo,
-    });
+    result.push({ type: 'context', content: oldLines[oldIdx], oldLineNo, newLineNo });
     oldIdx++;
     newIdx++;
     oldLineNo++;
     newLineNo++;
   }
 
-  // Remaining removed lines
   while (oldIdx < oldLines.length) {
-    result.push({
-      type: 'removed',
-      content: oldLines[oldIdx],
-      oldLineNo: oldLineNo,
-      newLineNo: null,
-    });
+    result.push({ type: 'removed', content: oldLines[oldIdx], oldLineNo, newLineNo: null });
     oldIdx++;
     oldLineNo++;
   }
 
-  // Remaining added lines
   while (newIdx < newLines.length) {
-    result.push({
-      type: 'added',
-      content: newLines[newIdx],
-      oldLineNo: null,
-      newLineNo: newLineNo,
-    });
+    result.push({ type: 'added', content: newLines[newIdx], oldLineNo: null, newLineNo });
     newIdx++;
     newLineNo++;
   }
@@ -152,7 +151,6 @@ function computeLCS(oldLines: string[], newLines: string[]): LCSMatch[] {
   const m = oldLines.length;
   const n = newLines.length;
 
-  // DP table
   const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
 
   for (let i = 1; i <= m; i++) {
@@ -165,7 +163,6 @@ function computeLCS(oldLines: string[], newLines: string[]): LCSMatch[] {
     }
   }
 
-  // Backtrack to find matches
   const matches: LCSMatch[] = [];
   let i = m;
   let j = n;
@@ -201,20 +198,15 @@ function getLineStyle(type: DiffLine['type'], theme: OttoTheme): React.CSSProper
     return {
       ...base,
       background: theme.isDark ? 'rgba(248, 81, 73, 0.15)' : 'rgba(255, 129, 130, 0.15)',
-      color: theme.isDark ? '#fca5a5' : '#82071e',
     };
   }
   if (type === 'added') {
     return {
       ...base,
       background: theme.isDark ? 'rgba(63, 185, 80, 0.15)' : 'rgba(46, 160, 67, 0.15)',
-      color: theme.isDark ? '#7ee787' : '#116329',
     };
   }
-  return {
-    ...base,
-    color: theme.text,
-  };
+  return base;
 }
 
 function buildStyles(theme: OttoTheme) {
@@ -267,6 +259,7 @@ function buildStyles(theme: OttoTheme) {
       userSelect: 'none' as const,
       flexShrink: 0,
       fontWeight: 700,
+      color: theme.textMuted,
     } as React.CSSProperties,
 
     code: {

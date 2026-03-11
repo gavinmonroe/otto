@@ -9,12 +9,12 @@
 // Uses the MR context from the store to build the correct GitLab URL.
 // ---------------------------------------------------------------------------
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { ExternalLink, Eye, EyeOff, FileCode } from 'lucide-react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
-import { Markdown } from '@/components/Markdown';
 import { useReviewStore } from '@/services/review/review-store';
 import { sendMessage } from '@/lib/messaging';
+import { highlight, extToLang } from '@/services/syntax/highlighter';
 
 type GitLabFileLinkProps = {
   filePath: string;
@@ -97,9 +97,6 @@ export function GitLabFileLink({
     setPreviewLoading(false);
   }, [previewOpen, previewContent, mrContext, filePath]);
 
-  // Detect language from file extension for syntax highlighting
-  const lang = filePath.split('.').pop() || '';
-
   if (variant === 'block') {
     return (
       <div>
@@ -155,7 +152,7 @@ export function GitLabFileLink({
             content={previewContent}
             loading={previewLoading}
             error={previewError}
-            lang={lang}
+            filePath={filePath}
             theme={theme}
           />
         )}
@@ -192,15 +189,37 @@ function FilePreviewPanel({
   content,
   loading,
   error,
-  lang,
+  filePath,
   theme,
 }: {
   content: string | null;
   loading: boolean;
   error: string | null;
-  lang: string;
+  filePath: string;
   theme: OttoTheme;
 }) {
+  const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
+
+  const lang = extToLang(filePath);
+
+  // Truncate very large files
+  const lines = content?.split('\n') ?? [];
+  const truncated = lines.length > 500;
+  const displayContent = truncated
+    ? lines.slice(0, 500).join('\n') + '\n// ... (truncated, showing first 500 lines)'
+    : content;
+
+  useEffect(() => {
+    if (!displayContent) return;
+    let cancelled = false;
+
+    highlight(displayContent, lang, theme.isDark).then((html) => {
+      if (!cancelled) setHighlightedHtml(html);
+    });
+
+    return () => { cancelled = true; };
+  }, [displayContent, lang, theme.isDark]);
+
   if (loading) {
     return (
       <div style={{
@@ -235,13 +254,6 @@ function FilePreviewPanel({
 
   if (!content) return null;
 
-  // Truncate very large files
-  const lines = content.split('\n');
-  const truncated = lines.length > 500;
-  const displayContent = truncated
-    ? lines.slice(0, 500).join('\n') + '\n// ... (truncated, showing first 500 lines)'
-    : content;
-
   return (
     <div style={{
       marginBottom: '8px',
@@ -261,8 +273,22 @@ function FilePreviewPanel({
         <span>{lines.length} lines</span>
         {truncated && <span style={{ color: theme.warning }}>Showing first 500 lines</span>}
       </div>
-      <div style={{ maxHeight: '400px', overflow: 'auto' }}>
-        <Markdown content={`\`\`\`${lang}\n${displayContent}\n\`\`\``} />
+      <div style={{ maxHeight: '400px', overflow: 'auto', fontSize: '12px' }}>
+        {highlightedHtml ? (
+          <div dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+        ) : (
+          <pre style={{
+            margin: 0,
+            padding: '8px',
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+            fontSize: '12px',
+            color: theme.text,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}>
+            {displayContent}
+          </pre>
+        )}
       </div>
     </div>
   );
