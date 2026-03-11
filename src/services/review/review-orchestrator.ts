@@ -174,7 +174,10 @@ async function fetchTicketContext(
   send: SendChunk,
 ): Promise<string | null> {
   const providers = settings.tickets?.providers ?? [];
-  if (providers.length === 0) return null;
+  if (providers.length === 0) {
+    send({ type: 'STREAM_PROGRESS', payload: { message: 'No ticket providers configured — skipping ticket context.' } });
+    return null;
+  }
 
   const ticketKeys = extractTicketRefs(
     context.title,
@@ -183,9 +186,12 @@ async function fetchTicketContext(
     providers,
   );
 
-  if (ticketKeys.length === 0) return null;
+  if (ticketKeys.length === 0) {
+    send({ type: 'STREAM_PROGRESS', payload: { message: 'No ticket references found in MR title, description, or branch name.' } });
+    return null;
+  }
 
-  send({ type: 'STREAM_PROGRESS', payload: { message: `Fetching ticket context for ${ticketKeys.join(', ')}...` } });
+  send({ type: 'STREAM_PROGRESS', payload: { message: `Found ticket refs: ${ticketKeys.join(', ')}. Fetching context...` } });
 
   // Load from cache first
   const cachedMap = await loadCachedTickets(ticketKeys);
@@ -196,6 +202,7 @@ async function fetchTicketContext(
     const cached = cachedMap.get(key);
     if (cached) {
       tickets.set(key, cached);
+      send({ type: 'STREAM_PROGRESS', payload: { message: `${key}: loaded from cache` } });
     } else {
       uncachedKeys.push(key);
     }
@@ -204,16 +211,22 @@ async function fetchTicketContext(
   // Fetch uncached tickets
   for (const ticketKey of uncachedKeys) {
     const provider = findProviderForKey(ticketKey, providers);
-    if (!provider) continue;
+    if (!provider) {
+      send({ type: 'STREAM_PROGRESS', payload: { message: `${ticketKey}: no matching provider found (check project prefixes)` } });
+      continue;
+    }
 
     try {
       const result = await fetchJiraTicket(provider, ticketKey);
       if (result.ok) {
         tickets.set(ticketKey, result.data);
         await saveCachedTicket(ticketKey, provider.baseUrl, result.data);
+        send({ type: 'STREAM_PROGRESS', payload: { message: `${ticketKey}: fetched "${result.data.title}"` } });
+      } else {
+        send({ type: 'STREAM_PROGRESS', payload: { message: `${ticketKey}: fetch failed — ${result.error}` } });
       }
-    } catch {
-      // Non-fatal — skip this ticket
+    } catch (error) {
+      send({ type: 'STREAM_PROGRESS', payload: { message: `${ticketKey}: fetch error — ${error instanceof Error ? error.message : 'unknown'}` } });
     }
   }
 
