@@ -30,18 +30,75 @@ export async function executeReview(
 ): Promise<void> {
   const host = resolveHost(settings, context.hostUrl);
 
-  // Pre-fetch context that multiple tasks need
+  // Start summary immediately — it only needs the diff, no pre-fetching.
+  // This ensures the port stays alive while context enrichment runs.
+  const taskPromises: Promise<void>[] = [];
+
+  if (tasks.includes('summary')) {
+    taskPromises.push(runSummaryTask(context, settings, send));
+  }
+
+  // Pre-fetch context in parallel with summary
+  const contextReady = prepareContext(context, tasks, host);
+
+  // Wait for context, then launch remaining tasks
+  const remainingTasks = contextReady.then(async ({ fileContents, fileTreePaths, enrichedContext }) => {
+    const remaining: Promise<void>[] = [];
+
+    if (tasks.includes('codeReview')) {
+      remaining.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, host, send));
+    }
+
+    if (tasks.includes('edgeCases')) {
+      remaining.push(runEdgeCasesTask(context, settings, fileContents, send));
+    }
+
+    if (tasks.includes('relatedFiles')) {
+      remaining.push(
+        runRelatedFilesTask(context, settings, fileContents, fileTreePaths, host, send),
+      );
+    }
+
+    await Promise.all(remaining);
+  });
+
+  taskPromises.push(remainingTasks);
+
+  await Promise.all(taskPromises);
+
+  send({ type: 'STREAM_ALL_COMPLETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Context preparation — runs in parallel with summary
+// ---------------------------------------------------------------------------
+
+type PreparedContext = {
+  fileContents: Map<string, string>;
+  fileTreePaths: string[];
+  enrichedContext: EnrichedContext | null;
+};
+
+async function prepareContext(
+  context: MrContext,
+  tasks: ReviewTask[],
+  host: GitLabHost | null,
+): Promise<PreparedContext> {
   const fileContents = new Map<string, string>();
   let fileTreePaths: string[] = [];
   let enrichedContext: EnrichedContext | null = null;
 
-  if (host && context.projectId) {
-    // Fetch file contents for changed files (from target branch, for context)
-    const contentTasks = context.diffFiles
-      .filter((f) => !f.isNew && !f.isDeleted)
-      .map((f) => f.filePath);
+  if (!host || !context.projectId) {
+    return { fileContents, fileTreePaths, enrichedContext };
+  }
 
-    if (contentTasks.length > 0) {
+  // Fetch file contents for changed files (from target branch, for context)
+  const contentTasks = context.diffFiles
+    .filter((f) => !f.isNew && !f.isDeleted)
+    .map((f) => f.filePath);
+
+  if (contentTasks.length > 0) {
+    try {
       const contents = await repoService.fetchMultipleFiles(
         host,
         context.projectId,
@@ -51,9 +108,13 @@ export async function executeReview(
       for (const [path, content] of contents) {
         if (content) fileContents.set(path, content);
       }
+    } catch {
+      // Non-fatal — reviews work without full file context
     }
+  }
 
-    // Fetch file tree (needed for related files + context enrichment)
+  // Fetch file tree (needed for related files + context enrichment)
+  try {
     const treeResult = await repoService.getFullFileTree(
       host,
       context.projectId,
@@ -77,32 +138,11 @@ export async function executeReview(
         // Non-fatal — reviews still work without enriched context
       }
     }
+  } catch {
+    // Non-fatal — file tree fetch failed
   }
 
-  // Run tasks in parallel — each task is isolated
-  const taskPromises: Promise<void>[] = [];
-
-  if (tasks.includes('summary')) {
-    taskPromises.push(runSummaryTask(context, settings, send));
-  }
-
-  if (tasks.includes('codeReview')) {
-    taskPromises.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, host, send));
-  }
-
-  if (tasks.includes('edgeCases')) {
-    taskPromises.push(runEdgeCasesTask(context, settings, fileContents, send));
-  }
-
-  if (tasks.includes('relatedFiles')) {
-    taskPromises.push(
-      runRelatedFilesTask(context, settings, fileContents, fileTreePaths, host, send),
-    );
-  }
-
-  await Promise.all(taskPromises);
-
-  send({ type: 'STREAM_ALL_COMPLETE' });
+  return { fileContents, fileTreePaths, enrichedContext };
 }
 
 // ---------------------------------------------------------------------------
