@@ -15,6 +15,7 @@
 import { useChatStore } from './chat-store';
 import { useReviewStore } from '@/services/review/review-store';
 import { openStream } from '@/lib/messaging';
+import { saveCachedChat, loadCachedChat } from './chat-cache';
 import type { StreamChunk, ChatReviewContext } from '@/types/messages';
 
 // ---------------------------------------------------------------------------
@@ -212,6 +213,8 @@ function startChatStream(
               chunk.payload.suggestedQuestions,
             );
             activeDisconnect = null;
+            // Persist to cache
+            persistChatToCache();
             break;
 
           case 'STREAM_CHAT_ERROR':
@@ -241,4 +244,43 @@ function startChatStream(
       },
     },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Cache persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Save current chat state to cache. Called after each completed assistant message.
+ */
+function persistChatToCache(): void {
+  const reviewState = useReviewStore.getState();
+  const chatState = useChatStore.getState();
+
+  if (!reviewState.mrContext) return;
+  if (chatState.messages.length === 0) return;
+
+  saveCachedChat(
+    reviewState.mrContext.projectPath,
+    reviewState.mrContext.mrIid,
+    chatState.messages,
+    chatState.suggestedQuestions,
+  );
+}
+
+/**
+ * Try to load cached chat messages and hydrate the chat store.
+ * Called once when the content script initializes.
+ * Returns true if cache was found and loaded.
+ */
+export async function tryLoadCachedChat(
+  projectPath: string,
+  mrIid: number,
+): Promise<boolean> {
+  const cached = await loadCachedChat(projectPath, mrIid);
+  if (cached && cached.messages.length > 0) {
+    useChatStore.getState().hydrateFromCache(cached);
+    return true;
+  }
+  return false;
 }

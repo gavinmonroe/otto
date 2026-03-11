@@ -40,6 +40,10 @@ export type CachedReview = {
   edgeCases: EdgeCase[];
   /** Per-file diff hashes for incremental re-review. Maps filePath → hash. */
   fileDiffHashes: Record<string, string>;
+  /** Ticket context from Jira/etc. Null if no tickets were linked. */
+  ticketContext?: string | null;
+  /** Ticket keys (e.g., ["PROJ-123"]) extracted from the MR. */
+  ticketKeys?: string[];
 };
 
 /**

@@ -166,6 +166,8 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
       relatedFiles: cached.relatedFiles,
       edgeCases: cached.edgeCases,
       edgeCasesDelta: '',
+      ticketContext: cached.ticketContext ?? null,
+      ticketKeys: cached.ticketKeys ?? [],
       startedAt: cached.timestamp,
       completedAt: cached.timestamp,
     });

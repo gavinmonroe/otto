@@ -16,6 +16,7 @@
 
 import { create } from 'zustand';
 import type { ChatMessage, ChatStatus, SuggestedQuestion } from '@/types/chat';
+import type { CachedChat } from './chat-cache';
 import { generateId } from '@/lib/utils';
 
 type ChatState = {
@@ -47,6 +48,9 @@ type ChatActions = {
    * Used by retry to strip the failed user message before re-sending.
    */
   popMessagesAfter: (messageId: string) => void;
+
+  // Cache hydration
+  hydrateFromCache: (cached: CachedChat) => void;
 
   // Lifecycle
   reset: () => void;
@@ -118,6 +122,14 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
     const idx = s.messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return {};
     return { messages: s.messages.slice(0, idx) };
+  }),
+
+  hydrateFromCache: (cached) => set({
+    messages: cached.messages,
+    suggestedQuestions: cached.suggestedQuestions,
+    status: 'idle',
+    error: null,
+    currentDelta: '',
   }),
 
   reset: () => set(INITIAL_STATE),

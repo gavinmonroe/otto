@@ -191,6 +191,8 @@ export function startReviewStream(
             relatedFiles: state.relatedFiles,
             edgeCases: state.edgeCases,
             fileDiffHashes: computeFileDiffHashes(mrContext.diffFiles),
+            ticketContext: state.ticketContext,
+            ticketKeys: state.ticketKeys,
           };
           saveCachedReview(cached);
         }

@@ -1,11 +1,9 @@
 // ---------------------------------------------------------------------------
-// SuggestedQuestions — clickable pill buttons for follow-up questions.
+// SuggestedQuestions — clickable question chips.
 //
-// Shown in two contexts:
-// 1. Initial state (empty conversation) — hardcoded starter questions
-// 2. After each AI response — contextual suggestions from the AI
-//
-// Each pill auto-fills and sends the question when clicked.
+// Redesigned to match Otto's design language:
+// - Uses secondary button style (flat, bordered) instead of rounded pills
+// - Consistent with the tag/badge patterns in MrOverviewPanel
 // ---------------------------------------------------------------------------
 
 import { useTheme } from '@/components/ThemeContext';
@@ -35,10 +33,10 @@ export function SuggestedQuestions({ questions, onSelect, disabled }: SuggestedQ
           onClick={() => onSelect(q.question)}
           disabled={disabled}
           style={{
-            background: theme.isDark ? 'rgba(64, 196, 245, 0.08)' : 'rgba(12, 147, 231, 0.06)',
-            border: `1px solid ${theme.isDark ? 'rgba(64, 196, 245, 0.2)' : 'rgba(12, 147, 231, 0.15)'}`,
-            borderRadius: '16px',
-            padding: '5px 12px',
+            background: theme.bgSubtle,
+            border: `1px solid ${theme.border}`,
+            borderRadius: '6px',
+            padding: '4px 10px',
             fontSize: '12px',
             color: theme.brand,
             cursor: disabled ? 'not-allowed' : 'pointer',
@@ -51,13 +49,13 @@ export function SuggestedQuestions({ questions, onSelect, disabled }: SuggestedQ
           onMouseEnter={(e) => {
             if (disabled) return;
             const el = e.currentTarget;
-            el.style.background = theme.isDark ? 'rgba(64, 196, 245, 0.15)' : 'rgba(12, 147, 231, 0.12)';
-            el.style.borderColor = theme.isDark ? 'rgba(64, 196, 245, 0.35)' : 'rgba(12, 147, 231, 0.3)';
+            el.style.background = theme.bgMuted;
+            el.style.borderColor = theme.brand;
           }}
           onMouseLeave={(e) => {
             const el = e.currentTarget;
-            el.style.background = theme.isDark ? 'rgba(64, 196, 245, 0.08)' : 'rgba(12, 147, 231, 0.06)';
-            el.style.borderColor = theme.isDark ? 'rgba(64, 196, 245, 0.2)' : 'rgba(12, 147, 231, 0.15)';
+            el.style.background = theme.bgSubtle;
+            el.style.borderColor = theme.border;
           }}
         >
           {q.label}
@@ -69,7 +67,6 @@ export function SuggestedQuestions({ questions, onSelect, disabled }: SuggestedQ
 
 /**
  * Default starter questions shown when the chat is first opened.
- * These are always available regardless of review state.
  */
 export const STARTER_QUESTIONS: SuggestedQuestion[] = [
   { label: 'Where should I start reviewing?', question: 'Where should I start reviewing this MR? Point me to the most important files and changes.' },

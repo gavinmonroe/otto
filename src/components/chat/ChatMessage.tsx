@@ -1,19 +1,11 @@
 // ---------------------------------------------------------------------------
 // ChatMessage — renders a single message in the chat conversation.
 //
-// User messages: right-aligned, brand-tinted background.
-// Assistant messages: left-aligned, subtle surface background, with markdown
-// rendering and inline DiffReference components for [[filePath:line]] syntax.
-//
-// Design decisions:
-// - Completed assistant messages use splitIntoSegments to interleave markdown
-//   text with clickable DiffReference chips. Each text segment is rendered
-//   through the Markdown component independently.
-// - Streaming deltas use stripFileRefSyntax for clean display — we don't
-//   try to render DiffReference during streaming because partial [[...]]
-//   tokens would break the parser.
-// - The suggestions comment block (<!-- suggestions: [...] -->) is stripped
-//   from display during streaming via a simple regex.
+// Redesigned to match Otto's panel design language:
+// - User messages: flat block with subtle brand-tinted left border
+// - Assistant messages: flat block with markdown rendering
+// - No chat bubbles — messages are full-width sections like review panels
+// - File references rendered inline via otto-ref:// protocol
 // ---------------------------------------------------------------------------
 
 import { useMemo, useCallback } from 'react';
@@ -36,16 +28,14 @@ type ChatMessageProps = {
  */
 export function ChatMessage({ message }: ChatMessageProps) {
   if (message.role === 'user') {
-    return <UserBubble content={message.content} />;
+    return <UserBlock content={message.content} />;
   }
 
-  return <AssistantMessage content={message.content} />;
+  return <AssistantBlock content={message.content} />;
 }
 
 /**
  * Render the in-progress streaming delta.
- * Uses plain text with stripped file ref syntax — no DiffReference components
- * until the message is complete.
  */
 export function StreamingMessage({ delta }: { delta: string }) {
   const theme = useTheme();
@@ -61,7 +51,7 @@ export function StreamingMessage({ delta }: { delta: string }) {
   if (!displayText) {
     return (
       <div style={{
-        padding: '10px 14px',
+        padding: '8px 14px',
         color: theme.textMuted,
         fontSize: '13px',
       }}>
@@ -80,12 +70,8 @@ export function StreamingMessage({ delta }: { delta: string }) {
 
   return (
     <div style={{
-      padding: '10px 14px',
-      borderRadius: '12px',
-      borderTopLeftRadius: '4px',
-      background: theme.bgSubtle,
-      border: `1px solid ${theme.borderSubtle}`,
-      maxWidth: '95%',
+      padding: '8px 14px',
+      borderBottom: `1px solid ${theme.borderSubtle}`,
       fontSize: '13px',
       lineHeight: '1.5',
     }}>
@@ -108,22 +94,27 @@ export function StreamingMessage({ delta }: { delta: string }) {
 // Internal components
 // ---------------------------------------------------------------------------
 
-function UserBubble({ content }: { content: string }) {
+function UserBlock({ content }: { content: string }) {
   const theme = useTheme();
 
   return (
     <div style={{
-      display: 'flex',
-      justifyContent: 'flex-end',
-      padding: '2px 0',
+      padding: '8px 14px',
+      borderBottom: `1px solid ${theme.borderSubtle}`,
+      borderLeft: `3px solid ${theme.brand}`,
+      background: theme.isDark ? 'rgba(64, 196, 245, 0.04)' : 'rgba(12, 147, 231, 0.03)',
     }}>
       <div style={{
-        padding: '8px 14px',
-        borderRadius: '12px',
-        borderTopRightRadius: '4px',
-        background: theme.isDark ? 'rgba(64, 196, 245, 0.15)' : 'rgba(12, 147, 231, 0.1)',
-        border: `1px solid ${theme.isDark ? 'rgba(64, 196, 245, 0.25)' : 'rgba(12, 147, 231, 0.15)'}`,
-        maxWidth: '85%',
+        fontSize: '11px',
+        fontWeight: 600,
+        textTransform: 'uppercase' as const,
+        letterSpacing: '0.05em',
+        color: theme.textMuted,
+        marginBottom: '4px',
+      }}>
+        You
+      </div>
+      <div style={{
         fontSize: '13px',
         lineHeight: '1.5',
         color: theme.text,
@@ -135,22 +126,16 @@ function UserBubble({ content }: { content: string }) {
   );
 }
 
-function AssistantMessage({ content }: { content: string }) {
+function AssistantBlock({ content }: { content: string }) {
   const theme = useTheme();
 
-  // Convert [[filePath:line]] references to markdown links with otto-ref:// protocol.
-  // This keeps the entire content in a single Markdown render pass so markdown
-  // context (bold, lists, etc.) isn't broken across segments.
+  // Convert [[filePath:line]] references to markdown links with otto-ref:// protocol
   const processedContent = useMemo(() => convertRefsToMarkdownLinks(content), [content]);
 
   return (
     <div style={{
-      padding: '10px 14px',
-      borderRadius: '12px',
-      borderTopLeftRadius: '4px',
-      background: theme.bgSubtle,
-      border: `1px solid ${theme.borderSubtle}`,
-      maxWidth: '95%',
+      padding: '8px 14px',
+      borderBottom: `1px solid ${theme.borderSubtle}`,
       fontSize: '13px',
       lineHeight: '1.5',
     }}>
@@ -166,8 +151,6 @@ function AssistantMessage({ content }: { content: string }) {
 function ChatMarkdown({ content }: { content: string }) {
   const theme = useTheme();
 
-  // Custom URL transform that allows otto-ref:// protocol through.
-  // react-markdown's default sanitizer only allows http(s), mailto, etc.
   const urlTransform = useCallback((url: string) => {
     if (url.startsWith('otto-ref://')) return url;
     return defaultUrlTransform(url);
@@ -186,8 +169,6 @@ function ChatMarkdown({ content }: { content: string }) {
 
 /**
  * Build react-markdown component overrides for chat messages.
- * Extends the standard markdown rendering with a custom link handler
- * that detects otto-ref:// URLs and renders DiffReference components.
  */
 function buildChatComponents(t: OttoTheme): Components {
   return {
@@ -287,7 +268,6 @@ function buildChatComponents(t: OttoTheme): Components {
           return <DiffReference reference={ref} />;
         }
       }
-      // Regular link
       return (
         <a
           href={href}

@@ -30,6 +30,7 @@ import { startFollowUpButtonInjection } from '@/services/followup/followup-injec
 import { ChatPill } from '@/components/chat/ChatPill';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { useChatStore } from '@/services/chat/chat-store';
+import { tryLoadCachedChat } from '@/services/chat/chat-stream-dispatcher';
 import { createElement } from 'react';
 import type { ReviewTask } from '@/services/review/review-types';
 
@@ -49,6 +50,8 @@ export default defineContentScript({
     const lightContext = await buildMrContext(false);
     if (lightContext) {
       useReviewStore.getState().setMrContext(lightContext);
+      // Load cached chat history for this MR
+      tryLoadCachedChat(lightContext.projectPath, lightContext.mrIid);
     }
 
     // Start follow-up button injection immediately — comments exist on
