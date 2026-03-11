@@ -38,6 +38,9 @@ import type { RelatedFilesInput } from './prompts/related-files';
 import { buildFollowUpPrompt } from './prompts/followup';
 import type { FollowUpInput } from './prompts/followup';
 import type { FollowUpAnalysis, FollowUpAction } from '@/types/followup';
+import { buildChatPrompt } from './prompts/chat';
+import type { ChatReviewContext } from '@/types/messages';
+import type { ChatMessage as UiChatMessage, SuggestedQuestion } from '@/types/chat';
 import { generateId } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
@@ -480,4 +483,102 @@ export async function generateFollowUp(
   };
 
   return { ok: true, data: analysis };
+}
+
+// ---------------------------------------------------------------------------
+// MR Chat Q&A
+// ---------------------------------------------------------------------------
+
+export type ChatResponse = {
+  content: string;
+  suggestedQuestions: SuggestedQuestion[];
+};
+
+/**
+ * Extract suggested follow-up questions from the AI response.
+ * The AI embeds them as: <!-- suggestions: ["Q1?", "Q2?", "Q3?"] -->
+ *
+ * Returns the questions and the content with the suggestions block removed.
+ *
+ * The regex matches everything between "<!-- suggestions:" and "-->" rather
+ * than trying to match the JSON array directly. This handles questions that
+ * contain ] characters (e.g., "What about array[0]?").
+ */
+function extractSuggestedQuestions(text: string): { content: string; questions: SuggestedQuestion[] } {
+  const match = text.match(/<!--\s*suggestions:\s*([\s\S]*?)\s*-->/);
+  if (!match) {
+    return { content: text, questions: [] };
+  }
+
+  const content = text.replace(match[0], '').trimEnd();
+
+  try {
+    const jsonStr = match[1].trim();
+    const raw = JSON.parse(jsonStr) as string[];
+    const questions: SuggestedQuestion[] = raw
+      .filter((q) => typeof q === 'string' && q.trim())
+      .slice(0, 3)
+      .map((q) => ({ label: q, question: q }));
+    return { content, questions };
+  } catch {
+    return { content, questions: [] };
+  }
+}
+
+/**
+ * Generate a chat response for an MR Q&A question.
+ * Streams content deltas for real-time display.
+ *
+ * Unlike other AI methods, chat returns plain markdown — no JSON parsing.
+ * Suggested questions are extracted from an HTML comment in the response.
+ */
+export async function generateChatResponse(
+  aiConfig: AiConfig,
+  question: string,
+  reviewContext: ChatReviewContext,
+  history: UiChatMessage[],
+  onDelta?: (content: string) => void,
+  signal?: AbortSignal,
+): Promise<Result<ChatResponse>> {
+  const messages = buildChatPrompt(
+    question,
+    reviewContext,
+    history,
+    getCustomPrompt(aiConfig, 'chat'),
+  );
+  const config = getClientConfig(aiConfig);
+  const model = getModel(aiConfig, 'chat');
+  const temperature = getTemperature(aiConfig, 'chat');
+  const max_tokens = getMaxTokens(aiConfig, 'chat');
+
+  let fullText = '';
+
+  if (onDelta) {
+    try {
+      const stream = chatCompletionStream(config, { model, messages, temperature, max_tokens }, signal);
+      for await (const chunk of stream) {
+        fullText += chunk;
+        onDelta(chunk);
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        return { ok: false, error: 'Chat cancelled' };
+      }
+      return { ok: false, error: error instanceof Error ? error.message : 'Chat stream failed' };
+    }
+  } else {
+    const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
+    if (!result.ok) return result;
+    fullText = result.data.choices[0]?.message?.content || '';
+  }
+
+  const { content, questions } = extractSuggestedQuestions(fullText);
+
+  return {
+    ok: true,
+    data: {
+      content,
+      suggestedQuestions: questions,
+    },
+  };
 }

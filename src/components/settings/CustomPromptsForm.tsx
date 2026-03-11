@@ -17,6 +17,7 @@ import { DEFAULT_CODE_REVIEW_PROMPT } from '@/services/ai/prompts/code-review';
 import { DEFAULT_EDGE_CASES_PROMPT } from '@/services/ai/prompts/edge-cases';
 import { DEFAULT_RELATED_FILES_PROMPT } from '@/services/ai/prompts/related-files';
 import { DEFAULT_FOLLOW_UP_PROMPT } from '@/services/ai/prompts/followup';
+import { DEFAULT_CHAT_PROMPT } from '@/services/ai/prompts/chat';
 
 type CustomPromptsFormProps = {
   settings: OttoSettings;
@@ -29,6 +30,7 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   edgeCases: 'Edge Cases',
   relatedFiles: 'Related Files',
   followUp: 'Comment Follow-Up',
+  chat: 'MR Chat Q&A',
 };
 
 const DEFAULT_PROMPTS: Record<AiTaskType, string> = {
@@ -37,6 +39,7 @@ const DEFAULT_PROMPTS: Record<AiTaskType, string> = {
   edgeCases: DEFAULT_EDGE_CASES_PROMPT,
   relatedFiles: DEFAULT_RELATED_FILES_PROMPT,
   followUp: DEFAULT_FOLLOW_UP_PROMPT,
+  chat: DEFAULT_CHAT_PROMPT,
 };
 
 export function CustomPromptsForm({ settings, onUpdate }: CustomPromptsFormProps) {

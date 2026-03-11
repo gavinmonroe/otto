@@ -20,6 +20,7 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   edgeCases: 'Edge Cases',
   relatedFiles: 'Related Files',
   followUp: 'Comment Follow-Up',
+  chat: 'MR Chat Q&A',
 };
 
 export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {

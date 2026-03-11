@@ -14,7 +14,7 @@
 
 import type { TicketProvider } from './ticket';
 
-export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'followUp';
+export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'followUp' | 'chat';
 
 export type GitLabHost = {
   id: string;
@@ -63,6 +63,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       edgeCases: 'claude-sonnet-4-5',
       relatedFiles: 'claude-haiku-4-5',
       followUp: 'claude-sonnet-4-5',
+      chat: 'claude-sonnet-4-5',
     },
     temperatures: {
       summary: 0.3,
@@ -70,6 +71,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       edgeCases: 0.4,
       relatedFiles: 0.1,
       followUp: 0.3,
+      chat: 0.4,
     },
     maxTokens: {
       summary: 0,
@@ -77,6 +79,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       edgeCases: 0,
       relatedFiles: 0,
       followUp: 0,
+      chat: 0,
     },
     customPrompts: {
       summary: '',
@@ -84,6 +87,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       edgeCases: '',
       relatedFiles: '',
       followUp: '',
+      chat: '',
     },
   },
   gitlab: {

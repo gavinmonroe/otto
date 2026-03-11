@@ -30,6 +30,7 @@ import type {
   GitLabDiscussion,
 } from './gitlab';
 import type { FollowUpAnalysis, ThreadContext } from './followup';
+import type { ChatMessage, SuggestedQuestion } from './chat';
 import type { TicketInfo } from './ticket';
 import type { TicketProvider } from './ticket';
 
@@ -202,12 +203,34 @@ export type MessageResponseMap = {
 // a StreamComplete or StreamError arrives.
 // ---------------------------------------------------------------------------
 
-export type StreamRequest = {
-  type: 'STREAM_REVIEW';
-  payload: {
-    mrContext: MrContext;
-    tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'>;
-  };
+export type StreamRequest =
+  | {
+      type: 'STREAM_REVIEW';
+      payload: {
+        mrContext: MrContext;
+        tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'>;
+      };
+    }
+  | {
+      type: 'STREAM_CHAT';
+      payload: {
+        question: string;
+        history: ChatMessage[];
+        reviewContext: ChatReviewContext;
+      };
+    };
+
+/**
+ * Snapshot of review data passed to the chat AI for context.
+ * Built from the review store at the time the user sends a message.
+ * Kept as a separate type so the chat prompt builder has a clean contract.
+ */
+export type ChatReviewContext = {
+  mrContext: MrContext;
+  summary: MrSummary | null;
+  fileReviews: FileReview[];
+  edgeCases: EdgeCase[];
+  relatedFiles: RelatedFile[];
 };
 
 export type StreamChunk =
@@ -221,4 +244,7 @@ export type StreamChunk =
   | { type: 'STREAM_TICKET_CONTEXT'; payload: { ticketContext: string; ticketKeys: string[] } }
   | { type: 'STREAM_PROGRESS'; payload: { message: string } }
   | { type: 'STREAM_TASK_ERROR'; payload: { task: string; error: string } }
-  | { type: 'STREAM_ALL_COMPLETE' };
+  | { type: 'STREAM_ALL_COMPLETE' }
+  | { type: 'STREAM_CHAT_DELTA'; payload: { content: string } }
+  | { type: 'STREAM_CHAT_COMPLETE'; payload: { content: string; suggestedQuestions: SuggestedQuestion[] } }
+  | { type: 'STREAM_CHAT_ERROR'; payload: { error: string } };

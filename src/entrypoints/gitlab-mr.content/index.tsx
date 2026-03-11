@@ -27,6 +27,9 @@ import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { startInlineCommentInjection } from '@/services/review/inline-injector';
 import { startRelatedFilesSidebar } from '@/services/review/sidebar-injector';
 import { startFollowUpButtonInjection } from '@/services/followup/followup-injector';
+import { ChatPill } from '@/components/chat/ChatPill';
+import { ChatPanel } from '@/components/chat/ChatPanel';
+import { useChatStore } from '@/services/chat/chat-store';
 import { createElement } from 'react';
 import type { ReviewTask } from '@/services/review/review-types';
 
@@ -52,6 +55,10 @@ export default defineContentScript({
     // the overview tab, discussion tab, AND the diffs tab.
     startFollowUpButtonInjection(isDarkMode, ctx.signal);
 
+    // Mount the chat UI — available on any MR tab, not just diffs.
+    // The chat needs MR context but not necessarily a completed review.
+    mountChatUI(ctx, isDarkMode);
+
     // The rest of the review features require the diffs tab.
     // Run this in parallel so follow-up buttons aren't blocked.
     initDiffsFeatures(ctx, urlInfo, isDarkMode);
@@ -61,6 +68,7 @@ export default defineContentScript({
       if (!newUrlInfo) return;
       if (newUrlInfo.mrIid !== urlInfo.mrIid || newUrlInfo.projectPath !== urlInfo.projectPath) {
         useReviewStore.getState().reset();
+        useChatStore.getState().reset();
         const newContext = await buildMrContext(false);
         if (newContext) {
           useReviewStore.getState().setMrContext(newContext);
@@ -267,6 +275,71 @@ function getFooterResetStyles(): string {
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     button { font-family: inherit; }
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Chat UI — floating pill + panel, available on any MR tab.
+// ---------------------------------------------------------------------------
+
+async function mountChatUI(
+  ctx: typeof ContentScriptContext.prototype,
+  isDarkMode: boolean,
+): Promise<void> {
+  // Mount into a fixed-position shadow DOM container on the body
+  const ui = await createShadowRootUi(ctx, {
+    name: 'otto-chat',
+    position: 'overlay',
+    onMount: (container) => {
+      // Inject animation keyframes into the shadow root
+      const styleEl = document.createElement('style');
+      styleEl.textContent = getChatStyles();
+      container.append(styleEl);
+
+      const wrapper = document.createElement('div');
+      wrapper.setAttribute('data-otto-chat', 'true');
+      container.append(wrapper);
+
+      const root = createRoot(wrapper);
+      root.render(
+        createElement(ThemeProvider, {
+          isDark: isDarkMode,
+          children: createElement(OttoErrorBoundary, { name: 'Chat' },
+            createElement('div', null,
+              createElement(ChatPill),
+              createElement(ChatPanel),
+            ),
+          ),
+        }),
+      );
+      return root;
+    },
+    onRemove: (root) => {
+      root?.unmount();
+      useChatStore.getState().reset();
+    },
+  });
+
+  ui.mount();
+}
+
+function getChatStyles(): string {
+  return `
+    :host {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    button { font-family: inherit; }
+    @keyframes otto-chat-cursor {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    @keyframes otto-chat-pulse {
+      0%, 100% { opacity: 0.4; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1); }
+    }
   `;
 }
 

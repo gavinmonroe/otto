@@ -21,7 +21,7 @@ import { loadSettings, saveSettings } from '@/lib/storage';
 import * as gitlab from '@/services/gitlab/gitlab-client';
 import * as aiClient from '@/services/ai/ai-client';
 import { executeReview } from '@/services/review/review-orchestrator';
-import { generateFollowUp } from '@/services/ai/ai-service';
+import { generateFollowUp, generateChatResponse } from '@/services/ai/ai-service';
 import { loadCachedFollowUp, saveCachedFollowUp } from '@/services/followup/followup-cache';
 import { fetchJiraTicket, testJiraConnection } from '@/services/ticket/jira-client';
 import { loadCachedTicket, saveCachedTicket, loadCachedTickets } from '@/services/ticket/ticket-cache';
@@ -300,28 +300,63 @@ export default defineBackground(() => {
   registerMessageHandler(handlers);
 
   // -----------------------------------------------------------------
-  // Streaming handler — review pipeline
+  // Streaming handler — review pipeline + chat Q&A
   // -----------------------------------------------------------------
 
   registerStreamHandler(async (request, send) => {
-    if (request.type !== 'STREAM_REVIEW') return;
+    if (request.type === 'STREAM_REVIEW') {
+      const settings = await loadSettings();
 
-    const settings = await loadSettings();
+      if (!settings.ai.baseUrl) {
+        send({
+          type: 'STREAM_TASK_ERROR',
+          payload: { task: 'review', error: 'AI provider not configured. Open Otto settings to set up your AI endpoint.' },
+        });
+        send({ type: 'STREAM_ALL_COMPLETE' });
+        return;
+      }
 
-    if (!settings.ai.baseUrl) {
-      send({
-        type: 'STREAM_TASK_ERROR',
-        payload: { task: 'review', error: 'AI provider not configured. Open Otto settings to set up your AI endpoint.' },
-      });
-      send({ type: 'STREAM_ALL_COMPLETE' });
+      await executeReview(
+        request.payload.mrContext,
+        request.payload.tasks,
+        settings,
+        send,
+      );
       return;
     }
 
-    await executeReview(
-      request.payload.mrContext,
-      request.payload.tasks,
-      settings,
-      send,
-    );
+    if (request.type === 'STREAM_CHAT') {
+      const settings = await loadSettings();
+
+      if (!settings.ai.baseUrl) {
+        send({
+          type: 'STREAM_CHAT_ERROR',
+          payload: { error: 'AI provider not configured. Open Otto settings to set up your AI endpoint.' },
+        });
+        return;
+      }
+
+      const { question, history, reviewContext } = request.payload;
+
+      const result = await generateChatResponse(
+        settings.ai,
+        question,
+        reviewContext,
+        history,
+        (delta) => {
+          send({ type: 'STREAM_CHAT_DELTA', payload: { content: delta } });
+        },
+      );
+
+      if (result.ok) {
+        send({
+          type: 'STREAM_CHAT_COMPLETE',
+          payload: { content: result.data.content, suggestedQuestions: result.data.suggestedQuestions },
+        });
+      } else {
+        send({ type: 'STREAM_CHAT_ERROR', payload: { error: result.error } });
+      }
+      return;
+    }
   });
 });
