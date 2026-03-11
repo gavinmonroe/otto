@@ -69,17 +69,31 @@ function getMaxTokens(aiConfig: AiConfig, task: AiTaskType): number | undefined 
 /**
  * Extract JSON from an AI response that might be wrapped in markdown fences.
  * AI models sometimes respond with ```json ... ``` despite instructions not to.
+ *
+ * Strategy: try raw parse first (cheapest), then greedy fence extraction,
+ * then bare JSON object/array extraction as a last resort.
  */
 function extractJson(text: string): string {
-  // Try to find JSON in markdown code fences
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  const trimmed = text.trim();
+
+  // Fast path: if the raw text is already valid JSON, use it directly.
+  // This avoids regex mismatches entirely.
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return trimmed;
+  }
+
+  // Try to find JSON in markdown code fences.
+  // Use GREEDY [\s\S]* so we match the LAST closing fence, not the first.
+  // This is critical when the JSON contains embedded code blocks (e.g.,
+  // hypotheticalTrace fields with triple backticks inside).
+  const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*)\n?\s*```/);
   if (fenceMatch) return fenceMatch[1].trim();
 
   // Try to find a JSON object or array directly
-  const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  const jsonMatch = trimmed.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (jsonMatch) return jsonMatch[1].trim();
 
-  return text.trim();
+  return trimmed;
 }
 
 /**

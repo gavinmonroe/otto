@@ -74,7 +74,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
     maxTokens: {
       summary: 0,
       codeReview: 0,
-      edgeCases: 16384,
+      edgeCases: 0,
       relatedFiles: 0,
       followUp: 0,
     },
