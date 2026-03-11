@@ -16,6 +16,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useReviewStore } from '@/services/review/review-store';
 import { openStream } from '@/lib/messaging';
 import { OttoLogo } from '@/components/OttoLogo';
+import { useTheme } from '@/components/ThemeContext';
 import { ReviewComment } from './ReviewComment';
 import type { StreamChunk } from '@/types/messages';
 import type { ReviewCommentStatus } from '@/types/review';
@@ -27,6 +28,7 @@ type FileReviewCardProps = {
 export function FileReviewCard({ filePath }: FileReviewCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [singleFileLoading, setSingleFileLoading] = useState(false);
+  const theme = useTheme();
 
   // Subscribe to this file's review data from the store
   const fileReview = useReviewStore((s) =>
@@ -144,9 +146,11 @@ export function FileReviewCard({ filePath }: FileReviewCardProps) {
           <div style={{ marginBottom: '8px', fontSize: '11px' }}>
             Risk: <span style={{
               fontWeight: 600,
-              color: fileReview.riskLevel === 'high' ? '#dc2626'
-                : fileReview.riskLevel === 'medium' ? '#d97706'
-                : '#16a34a',
+              color: fileReview.riskLevel === 'high'
+                ? (theme.isDark ? '#fca5a5' : '#dc2626')
+                : fileReview.riskLevel === 'medium'
+                ? theme.warning
+                : theme.success,
             }}>{fileReview.riskLevel}</span>
           </div>
           {fileReview.comments.length === 0 ? (
