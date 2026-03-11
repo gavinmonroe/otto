@@ -250,10 +250,27 @@ export async function generateEdgeCases(
     fullText = result.data.choices[0]?.message?.content || '';
   }
 
-  const parsed = parseAiJson<RawEdgeCase[]>(fullText, 'edge cases');
+  const parsed = parseAiJson<RawEdgeCase[] | Record<string, RawEdgeCase[]>>(fullText, 'edge cases');
   if (!parsed.ok) return parsed;
 
-  const edgeCases: EdgeCase[] = parsed.data.map((e) => ({
+  // Handle AI wrapping the array in an object like {"edgeCases": [...]}
+  let rawEdgeCases: RawEdgeCase[];
+  if (Array.isArray(parsed.data)) {
+    rawEdgeCases = parsed.data;
+  } else if (typeof parsed.data === 'object' && parsed.data !== null) {
+    // Find the first array value in the object
+    const values = Object.values(parsed.data);
+    const arr = values.find((v) => Array.isArray(v));
+    if (arr) {
+      rawEdgeCases = arr;
+    } else {
+      return { ok: false, error: 'Edge cases response is not an array' };
+    }
+  } else {
+    return { ok: false, error: 'Edge cases response is not an array' };
+  }
+
+  const edgeCases: EdgeCase[] = rawEdgeCases.map((e) => ({
     id: generateId(),
     title: e.title,
     description: e.description,
