@@ -1,22 +1,9 @@
 // ---------------------------------------------------------------------------
 // Review Orchestrator — coordinates the full review pipeline.
 //
-// Runs in the service worker. This is the top-level coordinator that:
-// 1. Receives a review request (MrContext + which tasks to run)
-// 2. Fetches additional context from GitLab (file contents, file tree)
-// 3. Dispatches AI tasks in parallel where possible
-// 4. Streams results back to the content script via port messages
-//
-// Design decisions:
-// - Tasks are independent and run in parallel. A failure in one task
-//   (e.g., edge cases) doesn't block others (e.g., summary).
-// - File reviews are parallelized with concurrency control (3 at a time)
-//   to balance speed vs. API rate limits.
-// - The orchestrator doesn't hold state — it receives everything it needs
-//   as parameters and streams results via a callback. This makes it
-//   service-worker-safe (no in-memory state to lose on termination).
-// - GitLab context fetching (file contents, tree) happens before AI calls
-//   so we can include full file context in prompts.
+// Runs in the service worker. Now includes smart context enrichment:
+// before AI calls, it analyzes the repo to find callers, importers,
+// and exported symbols for each changed file.
 // ---------------------------------------------------------------------------
 
 import type { OttoSettings, GitLabHost } from '@/types/settings';
@@ -26,17 +13,14 @@ import type { ReviewTask } from './review-types';
 import * as aiService from '../ai/ai-service';
 import * as gitlab from '../gitlab/gitlab-client';
 import * as repoService from '../gitlab/repo-service';
+import { buildEnrichedContext, formatFileContext } from '../gitlab/context-enrichment';
+import type { EnrichedContext } from '../gitlab/context-enrichment';
 import { normalizeUrl } from '@/lib/utils';
 
 type SendChunk = (chunk: StreamChunk) => void;
 
 /**
  * Execute the full review pipeline.
- *
- * @param context - MR context (from content script)
- * @param tasks - Which review tasks to run
- * @param settings - Current Otto settings
- * @param send - Callback to stream results back to the content script
  */
 export async function executeReview(
   context: MrContext,
@@ -44,12 +28,12 @@ export async function executeReview(
   settings: OttoSettings,
   send: SendChunk,
 ): Promise<void> {
-  // Resolve the GitLab host for this MR
   const host = resolveHost(settings, context.hostUrl);
 
   // Pre-fetch context that multiple tasks need
   const fileContents = new Map<string, string>();
   let fileTreePaths: string[] = [];
+  let enrichedContext: EnrichedContext | null = null;
 
   if (host && context.projectId) {
     // Fetch file contents for changed files (from target branch, for context)
@@ -69,17 +53,28 @@ export async function executeReview(
       }
     }
 
-    // Fetch file tree if we need related files discovery
-    if (tasks.includes('relatedFiles')) {
-      const treeResult = await repoService.getFullFileTree(
-        host,
-        context.projectId,
-        context.targetBranch,
-      );
-      if (treeResult.ok) {
-        fileTreePaths = treeResult.data
-          .filter((item) => item.type === 'blob')
-          .map((item) => item.path);
+    // Fetch file tree (needed for related files + context enrichment)
+    const treeResult = await repoService.getFullFileTree(
+      host,
+      context.projectId,
+      context.targetBranch,
+    );
+    if (treeResult.ok) {
+      fileTreePaths = treeResult.data
+        .filter((item) => item.type === 'blob')
+        .map((item) => item.path);
+
+      // Build enriched context: reverse imports, callers, exported symbols
+      try {
+        enrichedContext = await buildEnrichedContext(
+          host,
+          context.projectId,
+          context.diffFiles,
+          context.targetBranch,
+          treeResult.data,
+        );
+      } catch {
+        // Non-fatal — reviews still work without enriched context
       }
     }
   }
@@ -92,7 +87,7 @@ export async function executeReview(
   }
 
   if (tasks.includes('codeReview')) {
-    taskPromises.push(runCodeReviewTask(context, settings, fileContents, send));
+    taskPromises.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, host, send));
   }
 
   if (tasks.includes('edgeCases')) {
@@ -105,14 +100,13 @@ export async function executeReview(
     );
   }
 
-  // Wait for all tasks to complete (errors are caught per-task)
   await Promise.all(taskPromises);
 
   send({ type: 'STREAM_ALL_COMPLETE' });
 }
 
 // ---------------------------------------------------------------------------
-// Individual task runners — each catches its own errors
+// Individual task runners
 // ---------------------------------------------------------------------------
 
 async function runSummaryTask(
@@ -144,9 +138,10 @@ async function runCodeReviewTask(
   context: MrContext,
   settings: OttoSettings,
   fileContents: Map<string, string>,
+  enrichedContext: EnrichedContext | null,
+  host: GitLabHost | null,
   send: SendChunk,
 ): Promise<void> {
-  // Review files in parallel with concurrency limit
   const concurrency = 3;
   const files = context.diffFiles.filter((f) => !f.isDeleted || f.diff.length > 0);
 
@@ -154,6 +149,36 @@ async function runCodeReviewTask(
     const batch = files.slice(i, i + concurrency);
     const batchPromises = batch.map(async (file) => {
       try {
+        // Build repo context string for this file
+        let repoContext: string | null = null;
+        let callerSnippets: Array<{ filePath: string; snippet: string }> | null = null;
+
+        if (enrichedContext) {
+          const fileCtx = enrichedContext.fileContexts.get(file.filePath);
+          if (fileCtx) {
+            repoContext = formatFileContext(fileCtx);
+
+            // Fetch truncated snippets from files that import this one
+            if (fileCtx.importedBy.length > 0 && host && context.projectId) {
+              callerSnippets = [];
+              const callersToFetch = fileCtx.importedBy.slice(0, 3); // Cap at 3
+              for (const callerPath of callersToFetch) {
+                const callerResult = await gitlab.fetchFileContent(
+                  host, context.projectId, callerPath, context.targetBranch,
+                );
+                if (callerResult.ok) {
+                  // Truncate to first 100 lines to keep prompt size reasonable
+                  const lines = callerResult.data.split('\n');
+                  const snippet = lines.slice(0, 100).join('\n') +
+                    (lines.length > 100 ? '\n// ... (truncated)' : '');
+                  callerSnippets.push({ filePath: callerPath, snippet });
+                }
+              }
+              if (callerSnippets.length === 0) callerSnippets = null;
+            }
+          }
+        }
+
         const result = await aiService.generateFileReview(
           settings.ai,
           {
@@ -161,6 +186,8 @@ async function runCodeReviewTask(
             fullFileContent: fileContents.get(file.filePath) || null,
             mrTitle: context.title,
             mrDescription: context.description,
+            repoContext,
+            callerSnippets,
           },
           (delta) => send({
             type: 'STREAM_FILE_REVIEW_DELTA',
@@ -236,7 +263,6 @@ async function runRelatedFilesTask(
   send: SendChunk,
 ): Promise<void> {
   try {
-    // Build import map from changed files
     const imports: Record<string, string[]> = {};
     for (const file of context.diffFiles) {
       const content = fileContents.get(file.filePath);
@@ -245,7 +271,6 @@ async function runRelatedFilesTask(
       }
     }
 
-    // Ask AI to discover related files
     const result = await aiService.discoverRelatedFiles(settings.ai, {
       diffFiles: context.diffFiles,
       imports,
@@ -258,7 +283,6 @@ async function runRelatedFilesTask(
       return;
     }
 
-    // Fetch content for discovered related files
     const relatedFiles: RelatedFile[] = [];
     if (host && context.projectId && result.data.length > 0) {
       const filePaths = result.data.map((f) => f.filePath);
@@ -278,7 +302,6 @@ async function runRelatedFilesTask(
         });
       }
     } else {
-      // No GitLab host configured — return files without content
       for (const rawFile of result.data) {
         relatedFiles.push({
           filePath: rawFile.filePath,

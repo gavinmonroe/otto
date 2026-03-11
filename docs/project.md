@@ -85,17 +85,22 @@ otto/
 │   │   └── gitlab-mr.content/             # Content script for MR diffs
 │   │       ├── index.tsx                   # Entry: detection, observer, mount
 │   │       ├── App.tsx                     # Root injected component
+│   │       ├── index.tsx                   # Entry: detection, observer, mount
 │   │       └── style.css                   # Tailwind entry for shadow DOM
 │   │
 │   ├── components/                         # Shared React components
+│   │   ├── OttoLogo.tsx                    # Brand logo (currentColor for dark mode)
+│   │   ├── Markdown.tsx                    # Markdown renderer (react-markdown + GFM)
+│   │   ├── ThemeContext.tsx                # Dark/light theme provider + useTheme hook
 │   │   ├── ui/                             # shadcn/ui primitives (button, card, etc.)
 │   │   ├── review/                         # Review-specific components
-│   │   │   ├── MrOverviewPanel.tsx
-│   │   │   ├── FileReviewCard.tsx
-│   │   │   ├── ReviewComment.tsx
-│   │   │   ├── RelatedFilesPanel.tsx
-│   │   │   ├── EdgeCaseAnalysis.tsx
-│   │   │   └── ReviewActions.tsx
+│   │   │   ├── MrOverviewPanel.tsx         # Summary banner above diffs
+│   │   │   ├── FileReviewCard.tsx          # Compact button in diff file header
+│   │   │   ├── FileReviewFooter.tsx        # Collapsible review sections in diff footer
+│   │   │   ├── ReviewComment.tsx           # Single review comment (used in footer)
+│   │   │   ├── RelatedFilesPanel.tsx       # Related files not in the diff
+│   │   │   ├── EdgeCaseAnalysis.tsx        # Edge case / stack trace analysis
+│   │   │   └── ReviewActions.tsx           # Accept/dismiss/edit actions
 │   │   └── settings/                       # Settings form components
 │   │       ├── AiProviderForm.tsx
 │   │       ├── GitLabConnectionForm.tsx
@@ -103,7 +108,7 @@ otto/
 │   │
 │   ├── services/                           # Business logic layer
 │   │   ├── ai/
-│   │   │   ├── ai-client.ts               # OpenAI SDK wrapper
+│   │   │   ├── ai-client.ts               # Raw fetch OpenAI-compatible client
 │   │   │   ├── ai-service.ts              # Orchestrates AI calls + model routing
 │   │   │   └── prompts/                    # Prompt templates (data, not logic)
 │   │   │       ├── summary.ts
@@ -118,7 +123,8 @@ otto/
 │   │   └── review/
 │   │       ├── review-orchestrator.ts      # Coordinates the full review pipeline
 │   │       ├── review-store.ts            # Zustand store for review state
-│   │       └── review-types.ts            # Shared review domain types
+│   │       ├── review-types.ts            # Shared review domain types
+│   │       └── stream-dispatcher.ts       # Shared chunk→store dispatch logic
 │   │
 │   ├── lib/                                # Pure utilities (no side effects)
 │   │   ├── utils.ts                        # cn() helper, general utils

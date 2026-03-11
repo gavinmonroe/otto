@@ -7,6 +7,7 @@ import { useState } from 'react';
 import type { EdgeCase } from '@/types/review';
 import { useTheme } from '@/components/ThemeContext';
 import { Markdown } from '@/components/Markdown';
+import { GitLabFileLink } from '@/components/GitLabFileLink';
 
 type EdgeCaseAnalysisProps = {
   edgeCases: EdgeCase[];
@@ -72,10 +73,12 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
           {categoryLabels[edgeCase.category] || edgeCase.category}
         </span>
         {edgeCase.filePath && (
-          <span style={{ fontSize: '11px', color: theme.textSecondary, fontFamily: 'monospace' }}>
-            {edgeCase.filePath}
-            {edgeCase.lineRange && `:${edgeCase.lineRange.start}-${edgeCase.lineRange.end}`}
-          </span>
+          <GitLabFileLink
+            filePath={edgeCase.filePath}
+            line={edgeCase.lineRange?.start ?? null}
+            lineEnd={edgeCase.lineRange?.end ?? null}
+            variant="inline"
+          />
         )}
       </div>
       <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px', color: theme.text }}>

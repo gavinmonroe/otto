@@ -49,6 +49,10 @@ export type CodeReviewInput = {
   fullFileContent: string | null;  // Content from target branch for context
   mrTitle: string;
   mrDescription: string | null;
+  /** Enriched repo context: who imports this file, what it exports, callers */
+  repoContext: string | null;
+  /** Content of files that import this file (truncated) */
+  callerSnippets: Array<{ filePath: string; snippet: string }> | null;
 };
 
 export function buildCodeReviewPrompt(input: CodeReviewInput): ChatMessage[] {
@@ -70,6 +74,20 @@ ${input.file.diff}
 \`\`\`
 ${input.fullFileContent}
 \`\`\``;
+  }
+
+  if (input.repoContext) {
+    userContent += `
+
+## Repository Context
+${input.repoContext}`;
+  }
+
+  if (input.callerSnippets && input.callerSnippets.length > 0) {
+    userContent += `
+
+## Files That Use This Code
+${input.callerSnippets.map((c) => `### ${c.filePath}\n\`\`\`\n${c.snippet}\n\`\`\``).join('\n\n')}`;
   }
 
   if (input.mrDescription) {
