@@ -1,5 +1,4 @@
 # Otto — AI Code Review for GitLab
-File not found: fullAccess/Fulcrum.Packager/Automations/IAutomationStep.cs at ref onco-18515-onco-18519-package-extraction-automation
 Otto is a Chrome extension that injects AI-powered code review tooling directly into GitLab merge request diff pages. It surfaces MR summaries, per-file review comments, related file discovery, edge case analysis, and comment follow-up suggestions — all rendered inline within the GitLab UI.
 
 All AI suggestions are drafts you can accept, edit, or dismiss. Nothing is auto-posted.

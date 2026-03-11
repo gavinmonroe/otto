@@ -503,9 +503,36 @@ async function runRelatedFilesTask(
       return;
     }
 
+    // Normalize AI-returned file paths:
+    // 1. Strip project/repo name prefix the AI sometimes prepends
+    // 2. Validate against the file tree when available
+    const treeSet = new Set(fileTreePaths);
+    const changedPaths = new Set(context.diffFiles.map((f) => f.filePath));
+    const projectSegments = context.projectPath.split('/');
+
+    const normalized = result.data.map((raw) => {
+      let fp = raw.filePath.replace(/^\/+/, '').trim();
+
+      // AI sometimes prepends "repoName/..." or "group/repo/..." to paths.
+      // Try stripping project path segments from the front.
+      for (let i = projectSegments.length - 1; i >= 0; i--) {
+        const prefix = projectSegments.slice(i).join('/') + '/';
+        if (fp.startsWith(prefix)) {
+          const stripped = fp.slice(prefix.length);
+          // If we have a tree, validate. Otherwise just strip it.
+          if (treeSet.size === 0 || treeSet.has(stripped)) {
+            fp = stripped;
+            break;
+          }
+        }
+      }
+
+      return { ...raw, filePath: fp };
+    }).filter((f) => !changedPaths.has(f.filePath));
+
     const relatedFiles: RelatedFile[] = [];
-    if (host && context.projectId && result.data.length > 0) {
-      const filePaths = result.data.map((f) => f.filePath);
+    if (host && context.projectId && normalized.length > 0) {
+      const filePaths = normalized.map((f) => f.filePath);
       const contents = await repoService.fetchMultipleFiles(
         host,
         context.projectId,
@@ -513,7 +540,7 @@ async function runRelatedFilesTask(
         context.sourceBranch,
       );
 
-      for (const rawFile of result.data) {
+      for (const rawFile of normalized) {
         relatedFiles.push({
           filePath: rawFile.filePath,
           reason: rawFile.reason,
@@ -522,7 +549,7 @@ async function runRelatedFilesTask(
         });
       }
     } else {
-      for (const rawFile of result.data) {
+      for (const rawFile of normalized) {
         relatedFiles.push({
           filePath: rawFile.filePath,
           reason: rawFile.reason,
