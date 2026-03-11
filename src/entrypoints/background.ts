@@ -111,6 +111,15 @@ export default defineBackground(() => {
         pat: payload.host.pat,
       });
     },
+
+    OPEN_OPTIONS: async () => {
+      try {
+        await chrome.runtime.openOptionsPage();
+        return { ok: true, data: undefined };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Failed to open options' };
+      }
+    },
   };
 
   registerMessageHandler(handlers);

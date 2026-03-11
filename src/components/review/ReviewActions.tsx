@@ -1,18 +1,11 @@
 // ---------------------------------------------------------------------------
 // ReviewActions — accept/dismiss/edit action buttons for review comments.
-//
-// Used by both FileReviewCard and the overview panel. Provides consistent
-// interaction patterns for all AI-generated suggestions.
-//
-// Design decisions:
-// - Accept copies the comment body to clipboard (user pastes into GitLab's
-//   native comment form). We don't auto-post to avoid accidental submissions.
-// - Dismiss marks the comment as dismissed (visual only, no API call).
-// - Edit opens an inline textarea for the user to modify before accepting.
+// Theme-aware via useTheme().
 // ---------------------------------------------------------------------------
 
 import { useState, useCallback } from 'react';
 import type { ReviewComment, ReviewCommentStatus } from '@/types/review';
+import { useTheme } from '@/components/ThemeContext';
 
 type ReviewActionsProps = {
   comment: ReviewComment;
@@ -20,6 +13,7 @@ type ReviewActionsProps = {
 };
 
 export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
+  const theme = useTheme();
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(comment.editedBody || comment.body);
   const [copied, setCopied] = useState(false);
@@ -32,7 +26,6 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
       onUpdateStatus(comment.id, 'accepted');
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard API may fail in some contexts — fall back to selection
       onUpdateStatus(comment.id, 'accepted');
     }
   }, [comment, onUpdateStatus]);
@@ -46,9 +39,19 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
     setIsEditing(false);
   }, [comment.id, editText, onUpdateStatus]);
 
+  const btnBase: React.CSSProperties = {
+    padding: '2px 8px',
+    borderRadius: '3px',
+    fontSize: '11px',
+    cursor: 'pointer',
+    border: `1px solid ${theme.border}`,
+    background: 'transparent',
+    color: theme.brandText,
+  };
+
   if (comment.status === 'dismissed') {
     return (
-      <span style={{ fontSize: '11px', color: '#9ca3af', fontStyle: 'italic' }}>
+      <span style={{ fontSize: '11px', color: theme.textMuted, fontStyle: 'italic' }}>
         Dismissed
       </span>
     );
@@ -56,7 +59,7 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
 
   if (comment.status === 'accepted') {
     return (
-      <span style={{ fontSize: '11px', color: '#16a34a', fontStyle: 'italic' }}>
+      <span style={{ fontSize: '11px', color: theme.success, fontStyle: 'italic' }}>
         {copied ? 'Copied to clipboard' : 'Accepted'}
       </span>
     );
@@ -75,17 +78,20 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
             fontSize: '12px',
             fontFamily: 'monospace',
             borderRadius: '4px',
-            border: '1px solid var(--border, #e5e7eb)',
-            background: 'var(--background, #fff)',
-            color: 'var(--foreground, #1f2937)',
+            border: `1px solid ${theme.border}`,
+            background: theme.bg,
+            color: theme.text,
             resize: 'vertical',
           }}
         />
-        <div className="otto-comment-actions">
-          <button className="otto-action-btn otto-action-btn-accept" onClick={handleSaveEdit}>
+        <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+          <button
+            style={{ ...btnBase, background: theme.isDark ? '#064e3b' : '#dcfce7', color: theme.isDark ? '#4ade80' : '#166534', borderColor: theme.isDark ? '#065f46' : '#86efac' }}
+            onClick={handleSaveEdit}
+          >
             Save
           </button>
-          <button className="otto-action-btn" onClick={() => setIsEditing(false)}>
+          <button style={btnBase} onClick={() => setIsEditing(false)}>
             Cancel
           </button>
         </div>
@@ -94,14 +100,20 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
   }
 
   return (
-    <div className="otto-comment-actions">
-      <button className="otto-action-btn otto-action-btn-accept" onClick={handleAccept}>
+    <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+      <button
+        style={{ ...btnBase, background: theme.isDark ? '#064e3b' : '#dcfce7', color: theme.isDark ? '#4ade80' : '#166534', borderColor: theme.isDark ? '#065f46' : '#86efac' }}
+        onClick={handleAccept}
+      >
         Accept
       </button>
-      <button className="otto-action-btn" onClick={() => setIsEditing(true)}>
+      <button style={btnBase} onClick={() => setIsEditing(true)}>
         Edit
       </button>
-      <button className="otto-action-btn otto-action-btn-dismiss" onClick={handleDismiss}>
+      <button
+        style={{ ...btnBase, background: theme.isDark ? '#450a0a' : '#fee2e2', color: theme.isDark ? '#fca5a5' : '#991b1b', borderColor: theme.isDark ? '#7f1d1d' : '#fca5a5' }}
+        onClick={handleDismiss}
+      >
         Dismiss
       </button>
     </div>

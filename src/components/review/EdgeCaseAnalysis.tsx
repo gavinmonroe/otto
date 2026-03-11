@@ -1,13 +1,11 @@
 // ---------------------------------------------------------------------------
-// EdgeCaseAnalysis — displays potential failure modes and edge cases
-// identified by the AI.
-//
-// Shows each edge case with severity, category, description, and
-// optional hypothetical stack trace in a collapsible format.
+// EdgeCaseAnalysis — displays potential failure modes and edge cases.
+// Theme-aware via useTheme().
 // ---------------------------------------------------------------------------
 
 import { useState } from 'react';
 import type { EdgeCase } from '@/types/review';
+import { useTheme } from '@/components/ThemeContext';
 
 type EdgeCaseAnalysisProps = {
   edgeCases: EdgeCase[];
@@ -27,11 +25,21 @@ export function EdgeCaseAnalysis({ edgeCases }: EdgeCaseAnalysisProps) {
 
 function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
   const [showTrace, setShowTrace] = useState(false);
+  const theme = useTheme();
 
   const severityColors: Record<string, { bg: string; text: string }> = {
-    critical: { bg: '#fecaca', text: '#991b1b' },
-    moderate: { bg: '#fef3c7', text: '#92400e' },
-    minor: { bg: '#dbeafe', text: '#1e40af' },
+    critical: {
+      bg: theme.isDark ? '#450a0a' : '#fecaca',
+      text: theme.isDark ? '#fca5a5' : '#991b1b',
+    },
+    moderate: {
+      bg: theme.isDark ? '#451a03' : '#fef3c7',
+      text: theme.isDark ? '#fbbf24' : '#92400e',
+    },
+    minor: {
+      bg: theme.isDark ? '#1e3a5f' : '#dbeafe',
+      text: theme.isDark ? '#93c5fd' : '#1e40af',
+    },
   };
 
   const colors = severityColors[edgeCase.severity] || severityColors.minor;
@@ -47,10 +55,7 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
   };
 
   return (
-    <div style={{
-      padding: '8px 0',
-      borderBottom: '1px solid #f3f4f6',
-    }}>
+    <div style={{ padding: '8px 0', borderBottom: `1px solid ${theme.borderSubtle}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
         <span style={{
           fontSize: '11px',
@@ -62,20 +67,20 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
         }}>
           {edgeCase.severity}
         </span>
-        <span style={{ fontSize: '11px', color: '#6b7280' }}>
+        <span style={{ fontSize: '11px', color: theme.textSecondary }}>
           {categoryLabels[edgeCase.category] || edgeCase.category}
         </span>
         {edgeCase.filePath && (
-          <span style={{ fontSize: '11px', color: '#6b7280', fontFamily: 'monospace' }}>
+          <span style={{ fontSize: '11px', color: theme.textSecondary, fontFamily: 'monospace' }}>
             {edgeCase.filePath}
             {edgeCase.lineRange && `:${edgeCase.lineRange.start}-${edgeCase.lineRange.end}`}
           </span>
         )}
       </div>
-      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>
+      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px', color: theme.text }}>
         {edgeCase.title}
       </div>
-      <div style={{ fontSize: '12px', lineHeight: '1.5', color: '#374151', whiteSpace: 'pre-wrap' }}>
+      <div style={{ fontSize: '12px', lineHeight: '1.5', color: theme.text, whiteSpace: 'pre-wrap' }}>
         {edgeCase.description}
       </div>
       {edgeCase.hypotheticalTrace && (
@@ -88,7 +93,7 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
               padding: 0,
               cursor: 'pointer',
               fontSize: '11px',
-              color: '#0c93e7',
+              color: theme.brand,
               marginTop: '4px',
             }}
           >
@@ -100,7 +105,7 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
               padding: '8px',
               fontSize: '11px',
               fontFamily: 'monospace',
-              background: '#1f2937',
+              background: theme.isDark ? '#0f172a' : '#1f2937',
               color: '#f87171',
               borderRadius: '4px',
               overflow: 'auto',

@@ -25,6 +25,7 @@ import { buildMrContext } from '@/services/gitlab/mr-parser';
 import { useReviewStore } from '@/services/review/review-store';
 import { MrOverviewPanel } from '@/components/review/MrOverviewPanel';
 import { FileReviewCard } from '@/components/review/FileReviewCard';
+import { ThemeProvider } from '@/components/ThemeContext';
 import { createElement } from 'react';
 
 export default defineContentScript({
@@ -98,10 +99,9 @@ async function mountOverviewPanel(
     onMount: (container) => {
       const wrapper = document.createElement('div');
       wrapper.setAttribute('data-otto-overview', 'true');
-      if (isDarkMode) wrapper.classList.add('dark');
       container.append(wrapper);
       const root = createRoot(wrapper);
-      root.render(createElement(MrOverviewPanel));
+      root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(MrOverviewPanel) }));
       return root;
     },
     onRemove: (root) => root?.unmount(),
@@ -148,7 +148,7 @@ function mountFileReviewCard(
   shadow.appendChild(mountPoint);
 
   const root = createRoot(mountPoint);
-  root.render(createElement(FileReviewCard, { filePath }));
+  root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(FileReviewCard, { filePath }) }));
 
   // Cleanup on context invalidation
   ctx.signal.addEventListener('abort', () => {

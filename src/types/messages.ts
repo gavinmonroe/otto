@@ -94,6 +94,10 @@ export type TestGitLabConnectionMessage = {
   payload: { host: GitLabHost };
 };
 
+export type OpenOptionsMessage = {
+  type: 'OPEN_OPTIONS';
+};
+
 export type RequestMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
@@ -105,7 +109,8 @@ export type RequestMessage =
   | FetchFileTreeMessage
   | FetchAiModelsMessage
   | TestAiConnectionMessage
-  | TestGitLabConnectionMessage;
+  | TestGitLabConnectionMessage
+  | OpenOptionsMessage;
 
 // ---------------------------------------------------------------------------
 // Response map — maps each request type to its response type.
@@ -123,6 +128,7 @@ export type MessageResponseMap = {
   FETCH_AI_MODELS: Result<string[]>;
   TEST_AI_CONNECTION: Result<{ model: string }>;
   TEST_GITLAB_CONNECTION: Result<{ username: string }>;
+  OPEN_OPTIONS: Result<void>;
 };
 
 // ---------------------------------------------------------------------------
