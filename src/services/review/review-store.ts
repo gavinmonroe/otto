@@ -1,0 +1,243 @@
+// ---------------------------------------------------------------------------
+// Review Store — Zustand store for review state in the content script.
+//
+// This store lives in the content script context. It holds the current
+// review state and provides actions for the UI to interact with.
+//
+// Design decisions:
+// - Ephemeral per page load — reviews are not persisted across navigations.
+//   This is intentional: MR diffs change, and stale reviews are misleading.
+// - The store is the single source of truth for what the UI renders.
+// - Stream deltas update the store incrementally for real-time rendering.
+// - Comment status changes (accept/dismiss/edit) are local-only — they
+//   don't trigger API calls. The user explicitly posts to GitLab.
+// - We use Zustand's immer-free approach: spread operators for immutable
+//   updates. The state shape is flat enough that this is manageable.
+// ---------------------------------------------------------------------------
+
+import { create } from 'zustand';
+import type {
+  MrContext,
+  MrSummary,
+  FileReview,
+  ReviewComment,
+  ReviewCommentStatus,
+  RelatedFile,
+  EdgeCase,
+  ReviewStatus,
+} from '@/types/review';
+import type { ReviewProgress, ReviewTask } from './review-types';
+import { INITIAL_REVIEW_PROGRESS } from './review-types';
+
+type ReviewState = {
+  // MR context (set once when the page loads)
+  mrContext: MrContext | null;
+
+  // Overall review status
+  status: ReviewStatus;
+  error: string | null;
+
+  // Per-task progress
+  progress: ReviewProgress;
+
+  // Review results
+  summary: MrSummary | null;
+  summaryDelta: string;           // Streaming accumulator for summary
+  fileReviews: FileReview[];
+  fileReviewDeltas: Record<string, string>;  // filePath → streaming accumulator
+  relatedFiles: RelatedFile[];
+  edgeCases: EdgeCase[];
+  edgeCasesDelta: string;         // Streaming accumulator for edge cases
+
+  // Timestamps
+  startedAt: number | null;
+  completedAt: number | null;
+};
+
+type ReviewActions = {
+  // Initialization
+  setMrContext: (context: MrContext) => void;
+  reset: () => void;
+
+  // Review lifecycle
+  startReview: (tasks: ReviewTask[]) => void;
+  completeReview: () => void;
+  setError: (error: string) => void;
+
+  // Summary
+  appendSummaryDelta: (content: string) => void;
+  setSummary: (summary: MrSummary) => void;
+
+  // File reviews
+  setFileReviewsTotal: (total: number) => void;
+  appendFileReviewDelta: (filePath: string, content: string) => void;
+  addFileReview: (review: FileReview) => void;
+
+  // Related files
+  setRelatedFiles: (files: RelatedFile[]) => void;
+
+  // Edge cases
+  appendEdgeCasesDelta: (content: string) => void;
+  setEdgeCases: (edgeCases: EdgeCase[]) => void;
+
+  // Task progress
+  setTaskStatus: (task: ReviewTask, status: ReviewProgress[ReviewTask]['status'], error?: string) => void;
+
+  // Comment actions (user interactions)
+  updateCommentStatus: (commentId: string, status: ReviewCommentStatus, editedBody?: string) => void;
+};
+
+const INITIAL_STATE: ReviewState = {
+  mrContext: null,
+  status: 'idle',
+  error: null,
+  progress: INITIAL_REVIEW_PROGRESS,
+  summary: null,
+  summaryDelta: '',
+  fileReviews: [],
+  fileReviewDeltas: {},
+  relatedFiles: [],
+  edgeCases: [],
+  edgeCasesDelta: '',
+  startedAt: null,
+  completedAt: null,
+};
+
+export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) => ({
+  ...INITIAL_STATE,
+
+  setMrContext: (context) => set({ mrContext: context }),
+
+  reset: () => set({ ...INITIAL_STATE, mrContext: get().mrContext }),
+
+  startReview: (tasks) => {
+    const progress = { ...INITIAL_REVIEW_PROGRESS };
+    for (const task of tasks) {
+      progress[task] = { ...progress[task], status: 'loading' };
+    }
+    set({
+      status: 'loading',
+      error: null,
+      progress,
+      summary: null,
+      summaryDelta: '',
+      fileReviews: [],
+      fileReviewDeltas: {},
+      relatedFiles: [],
+      edgeCases: [],
+      edgeCasesDelta: '',
+      startedAt: Date.now(),
+      completedAt: null,
+    });
+  },
+
+  completeReview: () => set({
+    status: 'complete',
+    completedAt: Date.now(),
+  }),
+
+  setError: (error) => set({ status: 'error', error }),
+
+  // Summary streaming
+  appendSummaryDelta: (content) => set((state) => ({
+    summaryDelta: state.summaryDelta + content,
+    status: 'streaming',
+    progress: {
+      ...state.progress,
+      summary: { ...state.progress.summary, status: 'streaming' },
+    },
+  })),
+
+  setSummary: (summary) => set((state) => ({
+    summary,
+    summaryDelta: '',
+    progress: {
+      ...state.progress,
+      summary: { ...state.progress.summary, status: 'complete' },
+    },
+  })),
+
+  // File review streaming
+  setFileReviewsTotal: (total) => set((state) => ({
+    progress: {
+      ...state.progress,
+      codeReview: { ...state.progress.codeReview, filesTotal: total },
+    },
+  })),
+
+  appendFileReviewDelta: (filePath, content) => set((state) => ({
+    fileReviewDeltas: {
+      ...state.fileReviewDeltas,
+      [filePath]: (state.fileReviewDeltas[filePath] || '') + content,
+    },
+    status: 'streaming',
+    progress: {
+      ...state.progress,
+      codeReview: { ...state.progress.codeReview, status: 'streaming' },
+    },
+  })),
+
+  addFileReview: (review) => set((state) => {
+    const { [review.filePath]: _, ...remainingDeltas } = state.fileReviewDeltas;
+    const filesComplete = state.progress.codeReview.filesComplete + 1;
+    return {
+      fileReviews: [...state.fileReviews, review],
+      fileReviewDeltas: remainingDeltas,
+      progress: {
+        ...state.progress,
+        codeReview: {
+          ...state.progress.codeReview,
+          filesComplete,
+          status: filesComplete >= state.progress.codeReview.filesTotal ? 'complete' : 'streaming',
+        },
+      },
+    };
+  }),
+
+  // Related files
+  setRelatedFiles: (files) => set((state) => ({
+    relatedFiles: files,
+    progress: {
+      ...state.progress,
+      relatedFiles: { ...state.progress.relatedFiles, status: 'complete' },
+    },
+  })),
+
+  // Edge cases streaming
+  appendEdgeCasesDelta: (content) => set((state) => ({
+    edgeCasesDelta: state.edgeCasesDelta + content,
+    progress: {
+      ...state.progress,
+      edgeCases: { ...state.progress.edgeCases, status: 'streaming' },
+    },
+  })),
+
+  setEdgeCases: (edgeCases) => set((state) => ({
+    edgeCases,
+    edgeCasesDelta: '',
+    progress: {
+      ...state.progress,
+      edgeCases: { ...state.progress.edgeCases, status: 'complete' },
+    },
+  })),
+
+  // Task progress
+  setTaskStatus: (task, status, error) => set((state) => ({
+    progress: {
+      ...state.progress,
+      [task]: { ...state.progress[task], status, error: error || null },
+    },
+  })),
+
+  // Comment actions
+  updateCommentStatus: (commentId, status, editedBody) => set((state) => ({
+    fileReviews: state.fileReviews.map((fr) => ({
+      ...fr,
+      comments: fr.comments.map((c) =>
+        c.id === commentId
+          ? { ...c, status, editedBody: editedBody ?? c.editedBody }
+          : c,
+      ),
+    })),
+  })),
+}));
