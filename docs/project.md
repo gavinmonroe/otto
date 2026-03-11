@@ -99,7 +99,9 @@ otto/
 │   │   │   ├── FileReviewCard.tsx          # Compact button in diff file header
 │   │   │   ├── FileReviewFooter.tsx        # Collapsible review sections in diff footer
 │   │   │   ├── ReviewComment.tsx           # Single review comment (used in footer)
-│   │   │   ├── RelatedFilesPanel.tsx       # Related files not in the diff
+│   │   │   ├── InlineCommentThread.tsx     # Inline comment injected next to diff lines
+│   │   │   ├── RelatedFilesPanel.tsx       # Related files in overview panel
+│   │   │   ├── RelatedFilesSidebarPanel.tsx # Related files in GitLab sidebar nav
 │   │   │   ├── EdgeCaseAnalysis.tsx        # Edge case / stack trace analysis
 │   │   │   └── ReviewActions.tsx           # Accept/dismiss/edit actions
 │   │   └── settings/                       # Settings form components
@@ -126,7 +128,14 @@ otto/
 │   │       ├── review-orchestrator.ts      # Coordinates the full review pipeline
 │   │       ├── review-store.ts            # Zustand store for review state
 │   │       ├── review-types.ts            # Shared review domain types
-│   │       └── stream-dispatcher.ts       # Shared chunk→store dispatch logic
+│   │       ├── review-cache.ts            # chrome.storage cache (project+MR+diffHash)
+│   │       ├── stream-dispatcher.ts       # Shared chunk→store dispatch logic
+│   │       ├── inline-injector.ts         # Injects comments into diff line rows
+│   │       └── sidebar-injector.ts        # Injects related files into GitLab sidebar
+│   │
+│   ├── services/syntax/                    # Syntax highlighting (Shiki)
+│   │   ├── highlighter.ts                 # Shiki core (runs in service worker)
+│   │   └── highlight-client.ts            # Message-passing client (content script)
 │   │
 │   ├── lib/                                # Pure utilities (no side effects)
 │   │   ├── utils.ts                        # cn() helper, general utils
