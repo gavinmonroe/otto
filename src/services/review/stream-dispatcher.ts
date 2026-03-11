@@ -11,6 +11,12 @@ import { openStream } from '@/lib/messaging';
 import type { StreamChunk, StreamRequest } from '@/types/messages';
 import type { ReviewTask } from '@/services/review/review-types';
 import type { MrContext } from '@/types/review';
+import {
+  loadCachedReview,
+  saveCachedReview,
+  computeDiffHash,
+  type CachedReview,
+} from './review-cache';
 
 /**
  * Dispatch a stream chunk to the review store.
@@ -55,17 +61,37 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
 }
 
 /**
+ * Try to load a cached review and hydrate the store.
+ * Returns true if cache was found and loaded, false otherwise.
+ */
+export async function tryLoadCachedReview(mrContext: MrContext): Promise<boolean> {
+  const diffHash = computeDiffHash(mrContext.diffFiles);
+  const cached = await loadCachedReview(mrContext.projectPath, mrContext.mrIid, diffHash);
+
+  if (cached) {
+    const store = useReviewStore.getState();
+    store.hydrateFromCache(cached);
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Start a review stream and dispatch all chunks to the store.
  * Returns a disconnect function to cancel the stream.
  *
  * Used by:
  * - useReview hook (manual "Review MR" button)
  * - Auto-review in the content script
+ *
+ * @param skipCache - If true, bypass cache (used for regeneration)
  */
 export function startReviewStream(
   mrContext: MrContext,
   tasks: ReviewTask[],
   onDisconnect?: () => void,
+  skipCache?: boolean,
 ): () => void {
   const store = useReviewStore.getState();
   store.reset();
@@ -75,7 +101,27 @@ export function startReviewStream(
   return openStream(
     { type: 'STREAM_REVIEW', payload: { mrContext, tasks } },
     {
-      onChunk: dispatchStreamChunk,
+      onChunk: (chunk) => {
+        dispatchStreamChunk(chunk);
+
+        // Save to cache when all tasks complete
+        if (chunk.type === 'STREAM_ALL_COMPLETE') {
+          const state = useReviewStore.getState();
+          const diffHash = computeDiffHash(mrContext.diffFiles);
+          const cached: CachedReview = {
+            version: 1,
+            projectPath: mrContext.projectPath,
+            mrIid: mrContext.mrIid,
+            diffHash,
+            timestamp: Date.now(),
+            summary: state.summary,
+            fileReviews: state.fileReviews,
+            relatedFiles: state.relatedFiles,
+            edgeCases: state.edgeCases,
+          };
+          saveCachedReview(cached);
+        }
+      },
       onDisconnect: () => {
         const state = useReviewStore.getState();
         if (state.status === 'loading' || state.status === 'streaming') {

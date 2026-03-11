@@ -9,6 +9,7 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { useReviewStore } from '@/services/review/review-store';
 import { startReviewStream } from '@/services/review/stream-dispatcher';
+import { deleteCachedReview, computeDiffHash } from '@/services/review/review-cache';
 import type { ReviewTask } from '@/services/review/review-types';
 
 export function useReview() {
@@ -34,6 +35,24 @@ export function useReview() {
     disconnectRef.current = disconnect;
   }, []);
 
+  /** Force regeneration — clears cache then starts a fresh review. */
+  const regenerateReview = useCallback(async (tasks: ReviewTask[] = ['summary', 'codeReview', 'edgeCases', 'relatedFiles']) => {
+    const mrContext = useReviewStore.getState().mrContext;
+    if (!mrContext) return;
+
+    // Delete cached review so the new one replaces it
+    const diffHash = computeDiffHash(mrContext.diffFiles);
+    await deleteCachedReview(mrContext.projectPath, mrContext.mrIid, diffHash);
+
+    disconnectRef.current?.();
+
+    const disconnect = startReviewStream(mrContext, tasks, () => {
+      disconnectRef.current = null;
+    }, true);
+
+    disconnectRef.current = disconnect;
+  }, []);
+
   const cancelReview = useCallback(() => {
     disconnectRef.current?.();
     disconnectRef.current = null;
@@ -53,6 +72,7 @@ export function useReview() {
     edgeCases: store.edgeCases,
     edgeCasesDelta: store.edgeCasesDelta,
     startReview,
+    regenerateReview,
     cancelReview,
     updateCommentStatus: store.updateCommentStatus,
   };

@@ -13,7 +13,7 @@ import { createRoot } from 'react-dom/client';
 import { parseMrUrl, waitForDiffsTab, observeDiffFiles } from '@/lib/dom-observer';
 import { buildMrContext } from '@/services/gitlab/mr-parser';
 import { useReviewStore } from '@/services/review/review-store';
-import { startReviewStream } from '@/services/review/stream-dispatcher';
+import { startReviewStream, tryLoadCachedReview } from '@/services/review/stream-dispatcher';
 import { sendMessage } from '@/lib/messaging';
 import { MrOverviewPanel } from '@/components/review/MrOverviewPanel';
 import { FileReviewCard } from '@/components/review/FileReviewCard';
@@ -243,6 +243,10 @@ function getFooterResetStyles(): string {
 // ---------------------------------------------------------------------------
 
 async function maybeAutoReview(mrContext: import('@/types/review').MrContext): Promise<void> {
+  // Try loading from cache first
+  const cached = await tryLoadCachedReview(mrContext);
+  if (cached) return; // Cache hit — no need to call AI
+
   const settingsResult = await sendMessage({ type: 'GET_SETTINGS' });
   if (!settingsResult.ok) return;
 

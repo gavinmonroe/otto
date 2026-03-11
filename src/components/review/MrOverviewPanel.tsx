@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { useState, useCallback, useMemo } from 'react';
-import { Settings } from 'lucide-react';
+import { Settings, RefreshCw } from 'lucide-react';
 import { useReview } from '@/hooks/use-review';
 import { useGitLabContext } from '@/hooks/use-gitlab-context';
 import { useSettings } from '@/hooks/use-settings';
@@ -31,6 +31,14 @@ export function MrOverviewPanel() {
       tasks.push('relatedFiles');
     }
     review.startReview(tasks);
+  }, [review, gitlabContext]);
+
+  const handleRegenerate = useCallback(() => {
+    const tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'> = ['summary', 'codeReview', 'edgeCases'];
+    if (gitlabContext?.isConfigured) {
+      tasks.push('relatedFiles');
+    }
+    review.regenerateReview(tasks);
   }, [review, gitlabContext]);
 
   const handleOpenSettings = useCallback(() => {
@@ -106,8 +114,9 @@ export function MrOverviewPanel() {
             </button>
           )}
           {isComplete && (
-            <button onClick={handleStartReview} style={s.secondaryButton}>
-              Re-review
+            <button onClick={handleRegenerate} style={s.secondaryButton} title="Clear cache and re-review">
+              <RefreshCw size={13} style={{ marginRight: '4px' }} />
+              Regenerate
             </button>
           )}
           <button onClick={handleOpenSettings} style={s.iconButton} title="Otto Settings">

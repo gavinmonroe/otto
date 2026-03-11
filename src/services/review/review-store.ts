@@ -28,6 +28,7 @@ import type {
 } from '@/types/review';
 import type { ReviewProgress, ReviewTask } from './review-types';
 import { INITIAL_REVIEW_PROGRESS } from './review-types';
+import type { CachedReview } from './review-cache';
 
 type ReviewState = {
   // MR context (set once when the page loads)
@@ -58,6 +59,9 @@ type ReviewActions = {
   // Initialization
   setMrContext: (context: MrContext) => void;
   reset: () => void;
+
+  // Cache hydration
+  hydrateFromCache: (cached: CachedReview) => void;
 
   // Review lifecycle
   startReview: (tasks: ReviewTask[]) => void;
@@ -109,6 +113,34 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
   setMrContext: (context) => set({ mrContext: context }),
 
   reset: () => set({ ...INITIAL_STATE, mrContext: get().mrContext }),
+
+  hydrateFromCache: (cached) => {
+    const allComplete = { ...INITIAL_REVIEW_PROGRESS };
+    for (const key of Object.keys(allComplete) as ReviewTask[]) {
+      allComplete[key] = { ...allComplete[key], status: 'complete' };
+    }
+    if (cached.fileReviews.length > 0) {
+      allComplete.codeReview = {
+        ...allComplete.codeReview,
+        filesTotal: cached.fileReviews.length,
+        filesComplete: cached.fileReviews.length,
+      };
+    }
+    set({
+      status: 'complete',
+      error: null,
+      progress: allComplete,
+      summary: cached.summary,
+      summaryDelta: '',
+      fileReviews: cached.fileReviews,
+      fileReviewDeltas: {},
+      relatedFiles: cached.relatedFiles,
+      edgeCases: cached.edgeCases,
+      edgeCasesDelta: '',
+      startedAt: cached.timestamp,
+      completedAt: cached.timestamp,
+    });
+  },
 
   startReview: (tasks) => {
     const progress = { ...INITIAL_REVIEW_PROGRESS };
