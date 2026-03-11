@@ -58,6 +58,8 @@ export type CodeReviewInput = {
   repoContext: string | null;
   /** Content of files that import this file (truncated) */
   callerSnippets: Array<{ filePath: string; snippet: string }> | null;
+  /** Formatted ticket context from linked issues */
+  ticketContext: string | null;
 };
 
 export function buildCodeReviewPrompt(input: CodeReviewInput, customSystemPrompt?: string): ChatMessage[] {
@@ -100,6 +102,13 @@ ${input.callerSnippets.map((c) => `### ${c.filePath}\n\`\`\`\n${c.snippet}\n\`\`
 
 ## MR Description
 ${input.mrDescription}`;
+  }
+
+  if (input.ticketContext) {
+    userContent += `
+
+## Linked Ticket(s)
+${input.ticketContext}`;
   }
 
   return [

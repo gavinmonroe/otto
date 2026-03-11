@@ -30,6 +30,8 @@ import type {
   GitLabDiscussion,
 } from './gitlab';
 import type { FollowUpAnalysis, ThreadContext } from './followup';
+import type { TicketInfo } from './ticket';
+import type { TicketProvider } from './ticket';
 
 // ---------------------------------------------------------------------------
 // Result type — used for all responses that can fail.
@@ -130,6 +132,21 @@ export type FetchMrDiscussionsMessage = {
   payload: { hostId: string; projectId: number; mrIid: number };
 };
 
+export type FetchTicketMessage = {
+  type: 'FETCH_TICKET';
+  payload: { ticketKey: string };
+};
+
+export type FetchTicketBatchMessage = {
+  type: 'FETCH_TICKET_BATCH';
+  payload: { ticketKeys: string[] };
+};
+
+export type TestJiraConnectionMessage = {
+  type: 'TEST_JIRA_CONNECTION';
+  payload: { provider: TicketProvider };
+};
+
 export type RequestMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
@@ -146,7 +163,10 @@ export type RequestMessage =
   | HighlightCodeMessage
   | HighlightLinesMessage
   | AnalyzeCommentMessage
-  | FetchMrDiscussionsMessage;
+  | FetchMrDiscussionsMessage
+  | FetchTicketMessage
+  | FetchTicketBatchMessage
+  | TestJiraConnectionMessage;
 
 // ---------------------------------------------------------------------------
 // Response map — maps each request type to its response type.
@@ -169,6 +189,9 @@ export type MessageResponseMap = {
   HIGHLIGHT_LINES: Result<string[]>;
   ANALYZE_COMMENT: Result<FollowUpAnalysis>;
   FETCH_MR_DISCUSSIONS: Result<GitLabDiscussion[]>;
+  FETCH_TICKET: Result<TicketInfo>;
+  FETCH_TICKET_BATCH: Result<Record<string, TicketInfo>>;
+  TEST_JIRA_CONNECTION: Result<{ displayName: string }>;
 };
 
 // ---------------------------------------------------------------------------

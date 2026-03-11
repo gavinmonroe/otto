@@ -19,6 +19,7 @@ import {
   loadCachedReview,
   saveCachedReview,
   computeDiffHash,
+  computeFileDiffHashes,
   type CachedReview,
 } from './review-cache';
 
@@ -186,6 +187,7 @@ export function startReviewStream(
             fileReviews: state.fileReviews,
             relatedFiles: state.relatedFiles,
             edgeCases: state.edgeCases,
+            fileDiffHashes: computeFileDiffHashes(mrContext.diffFiles),
           };
           saveCachedReview(cached);
         }

@@ -200,8 +200,9 @@ export async function generateSummary(
   context: MrContext,
   onDelta?: (content: string) => void,
   signal?: AbortSignal,
+  ticketContext?: string | null,
 ): Promise<Result<MrSummary>> {
-  const messages = buildSummaryPrompt(context, getCustomPrompt(aiConfig, 'summary'));
+  const messages = buildSummaryPrompt(context, getCustomPrompt(aiConfig, 'summary'), ticketContext ?? undefined);
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'summary');
   const temperature = getTemperature(aiConfig, 'summary');

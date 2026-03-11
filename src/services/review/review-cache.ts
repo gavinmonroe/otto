@@ -38,6 +38,8 @@ export type CachedReview = {
   fileReviews: FileReview[];
   relatedFiles: RelatedFile[];
   edgeCases: EdgeCase[];
+  /** Per-file diff hashes for incremental re-review. Maps filePath → hash. */
+  fileDiffHashes: Record<string, string>;
 };
 
 /**
@@ -56,6 +58,25 @@ export function computeDiffHash(diffFiles: DiffFileData[]): string {
     .map((f) => `${f.filePath}:${f.isNew}:${f.isDeleted}:${f.diff}`)
     .join('\n');
   return simpleHash(content);
+}
+
+/**
+ * Compute a hash for a single file's diff content.
+ * Used for incremental re-review: only files whose hash changed get re-reviewed.
+ */
+export function computeFileDiffHash(file: DiffFileData): string {
+  return simpleHash(`${file.filePath}:${file.isNew}:${file.isDeleted}:${file.diff}`);
+}
+
+/**
+ * Build a map of filePath → diffHash for all files in the MR.
+ */
+export function computeFileDiffHashes(diffFiles: DiffFileData[]): Record<string, string> {
+  const hashes: Record<string, string> = {};
+  for (const file of diffFiles) {
+    hashes[file.filePath] = computeFileDiffHash(file);
+  }
+  return hashes;
 }
 
 /**
@@ -110,6 +131,36 @@ export async function deleteCachedReview(
     await chrome.storage.local.remove(key);
   } catch {
     // Non-fatal
+  }
+}
+
+/**
+ * Load the most recent cached review for an MR, regardless of diffHash.
+ * Used for incremental re-review: we need the previous per-file hashes
+ * even when the overall diffHash has changed (new commits pushed).
+ */
+export async function loadLatestCachedReview(
+  projectPath: string,
+  mrIid: number,
+): Promise<CachedReview | null> {
+  try {
+    const prefix = `${CACHE_PREFIX}${projectPath}:${mrIid}:`;
+    const all = await chrome.storage.local.get(null);
+    let latest: CachedReview | null = null;
+
+    for (const [key, value] of Object.entries(all)) {
+      if (!key.startsWith(prefix)) continue;
+      const cached = value as CachedReview;
+      if (!cached || cached.version !== 1) continue;
+      if (Date.now() - cached.timestamp > CACHE_TTL_MS) continue;
+      if (!latest || cached.timestamp > latest.timestamp) {
+        latest = cached;
+      }
+    }
+
+    return latest;
+  } catch {
+    return null;
   }
 }
 

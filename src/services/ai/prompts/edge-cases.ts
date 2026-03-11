@@ -48,6 +48,7 @@ export type EdgeCaseInput = {
   fileContents: Record<string, string>;  // filePath → full content (target branch)
   mrTitle: string;
   mrDescription: string | null;
+  ticketContext: string | null;
 };
 
 export function buildEdgeCasePrompt(input: EdgeCaseInput, customSystemPrompt?: string): ChatMessage[] {
@@ -77,7 +78,7 @@ ${fullContent}
   }).join('\n\n---\n\n');
 
   const userContent = `# MR: ${input.mrTitle}
-${input.mrDescription ? `\n## Description\n${input.mrDescription}\n` : ''}
+${input.mrDescription ? `\n## Description\n${input.mrDescription}\n` : ''}${input.ticketContext ? `\n## Linked Ticket(s)\n${input.ticketContext}\n` : ''}
 ## Changed Files
 
 ${filesSection}`;

@@ -23,6 +23,9 @@ import * as aiClient from '@/services/ai/ai-client';
 import { executeReview } from '@/services/review/review-orchestrator';
 import { generateFollowUp } from '@/services/ai/ai-service';
 import { loadCachedFollowUp, saveCachedFollowUp } from '@/services/followup/followup-cache';
+import { fetchJiraTicket, testJiraConnection } from '@/services/ticket/jira-client';
+import { loadCachedTicket, saveCachedTicket, loadCachedTickets } from '@/services/ticket/ticket-cache';
+import { findProviderForKey } from '@/services/ticket/ticket-parser';
 import { highlight, highlightLines } from '@/services/syntax/highlighter';
 import { normalizeUrl } from '@/lib/utils';
 
@@ -147,6 +150,69 @@ export default defineBackground(() => {
       const host = settings.gitlab.hosts.find((h) => h.id === payload.hostId);
       if (!host) return { ok: false, error: 'GitLab host not found in settings' };
       return gitlab.fetchMrDiscussions(host, payload.projectId, payload.mrIid);
+    },
+
+    FETCH_TICKET: async (payload) => {
+      // Check cache first
+      const cached = await loadCachedTicket(payload.ticketKey);
+      if (cached) return { ok: true, data: cached };
+
+      const settings = await loadSettings();
+      const providers = settings.tickets?.providers ?? [];
+      const provider = findProviderForKey(payload.ticketKey, providers);
+      if (!provider) {
+        return { ok: false, error: `No ticket provider configured for ${payload.ticketKey}` };
+      }
+
+      const result = await fetchJiraTicket(provider, payload.ticketKey);
+      if (result.ok) {
+        await saveCachedTicket(payload.ticketKey, provider.baseUrl, result.data);
+      }
+      return result;
+    },
+
+    FETCH_TICKET_BATCH: async (payload) => {
+      const settings = await loadSettings();
+      const providers = settings.tickets?.providers ?? [];
+      if (providers.length === 0) {
+        return { ok: false, error: 'No ticket providers configured' };
+      }
+
+      // Load what we can from cache
+      const cachedMap = await loadCachedTickets(payload.ticketKeys);
+      const results: Record<string, import('@/types/ticket').TicketInfo> = {};
+      const uncachedKeys: string[] = [];
+
+      for (const key of payload.ticketKeys) {
+        const cached = cachedMap.get(key);
+        if (cached) {
+          results[key] = cached;
+        } else {
+          uncachedKeys.push(key);
+        }
+      }
+
+      // Fetch uncached tickets (concurrency of 3)
+      for (let i = 0; i < uncachedKeys.length; i += 3) {
+        const batch = uncachedKeys.slice(i, i + 3);
+        const fetches = batch.map(async (ticketKey) => {
+          const provider = findProviderForKey(ticketKey, providers);
+          if (!provider) return;
+
+          const result = await fetchJiraTicket(provider, ticketKey);
+          if (result.ok) {
+            results[ticketKey] = result.data;
+            await saveCachedTicket(ticketKey, provider.baseUrl, result.data);
+          }
+        });
+        await Promise.all(fetches);
+      }
+
+      return { ok: true, data: results };
+    },
+
+    TEST_JIRA_CONNECTION: async (payload) => {
+      return testJiraConnection(payload.provider);
     },
 
     ANALYZE_COMMENT: async (payload) => {

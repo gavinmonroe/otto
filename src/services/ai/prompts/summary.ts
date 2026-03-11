@@ -33,7 +33,7 @@ Guidelines:
 
 export const DEFAULT_SUMMARY_PROMPT = SYSTEM_PROMPT;
 
-export function buildSummaryPrompt(context: MrContext, customSystemPrompt?: string): ChatMessage[] {
+export function buildSummaryPrompt(context: MrContext, customSystemPrompt?: string, ticketContext?: string): ChatMessage[] {
   const diffSummary = context.diffFiles.map((f) => {
     const status = f.isNew ? '[NEW]' : f.isDeleted ? '[DELETED]' : f.isRenamed ? '[RENAMED]' : '[MODIFIED]';
     return `${status} ${f.filePath} (+${f.addedLines} -${f.removedLines})\n${f.diff}`;
@@ -46,7 +46,7 @@ export function buildSummaryPrompt(context: MrContext, customSystemPrompt?: stri
 
 ## Description
 ${context.description || '(No description provided)'}
-
+${ticketContext ? `\n## Linked Ticket(s)\n${ticketContext}` : ''}
 ## Changed Files (${context.diffFiles.length} files)
 
 ${diffSummary}`;

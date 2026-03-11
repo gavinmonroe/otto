@@ -12,6 +12,8 @@
 //   is NOT synced across devices and is only accessible to this extension.
 // ---------------------------------------------------------------------------
 
+import type { TicketProvider } from './ticket';
+
 export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'followUp';
 
 export type GitLabHost = {
@@ -40,6 +42,9 @@ export type OttoSettings = {
   ai: AiConfig;
   gitlab: {
     hosts: GitLabHost[];
+  };
+  tickets: {
+    providers: TicketProvider[];
   };
   preferences: Preferences;
 };
@@ -83,6 +88,9 @@ export const DEFAULT_SETTINGS: OttoSettings = {
   },
   gitlab: {
     hosts: [],
+  },
+  tickets: {
+    providers: [],
   },
   preferences: {
     autoReview: false,
