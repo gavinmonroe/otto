@@ -52,6 +52,8 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
     if (scanTimer) return;
     scanTimer = setTimeout(() => {
       scanTimer = null;
+      pruneDetachedButtons();
+      pruneDetachedPanels();
       scanAndInjectButtons(isDarkMode);
     }, 200);
   });
@@ -60,6 +62,27 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
     childList: true,
     subtree: true,
   });
+
+  // Periodic rescan — catches virtual scrolling edge cases where GitLab
+  // destroys and recreates note elements without triggering useful mutations.
+  // Same strategy as dom-observer.ts uses for diff files.
+  const rescanInterval = setInterval(() => {
+    pruneDetachedButtons();
+    pruneDetachedPanels();
+    scanAndInjectButtons(isDarkMode);
+  }, 3000);
+
+  // Rescan when tab becomes visible — GitLab may re-render discussions
+  const handleVisibility = () => {
+    if (document.visibilityState === 'visible') {
+      setTimeout(() => {
+        pruneDetachedButtons();
+        pruneDetachedPanels();
+        scanAndInjectButtons(isDarkMode);
+      }, 500);
+    }
+  };
+  document.addEventListener('visibilitychange', handleVisibility);
 
   // Subscribe to store for panel re-renders
   const storeUnsubscribe = useReviewStore.subscribe((state) => {
@@ -74,6 +97,8 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
   function cleanup() {
     observer.disconnect();
     storeUnsubscribe();
+    clearInterval(rescanInterval);
+    document.removeEventListener('visibilitychange', handleVisibility);
     if (scanTimer) clearTimeout(scanTimer);
 
     for (const [id, { root, container }] of mountedButtons) {
@@ -96,6 +121,30 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
   }
 
   return cleanup;
+}
+
+// ---------------------------------------------------------------------------
+// Pruning — remove tracked entries whose DOM containers were destroyed
+// by GitLab's virtual scrolling or discussion re-rendering.
+// ---------------------------------------------------------------------------
+
+function pruneDetachedButtons(): void {
+  for (const [noteId, { root, container }] of mountedButtons) {
+    if (!container.isConnected) {
+      root.unmount();
+      mountedButtons.delete(noteId);
+    }
+  }
+}
+
+function pruneDetachedPanels(): void {
+  for (const [commentId, { root, container }] of mountedPanels) {
+    if (!container.isConnected) {
+      root.unmount();
+      mountedPanels.delete(commentId);
+      visiblePanels.delete(commentId);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
