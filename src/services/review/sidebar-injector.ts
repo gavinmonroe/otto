@@ -16,6 +16,7 @@
 import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ThemeProvider } from '@/components/ThemeContext';
+import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { useReviewStore } from '@/services/review/review-store';
 import { RelatedFilesSidebarPanel } from '@/components/review/RelatedFilesSidebarPanel';
 
@@ -128,7 +129,9 @@ function renderSidebar(isDarkMode: boolean): void {
   sidebarRoot.render(
     createElement(ThemeProvider, {
       isDark: isDarkMode,
-      children: createElement(RelatedFilesSidebarPanel),
+      children: createElement(OttoErrorBoundary, { name: 'RelatedFiles' },
+        createElement(RelatedFilesSidebarPanel),
+      ),
     }),
   );
 }

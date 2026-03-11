@@ -68,3 +68,44 @@ export type GitLabBlameRange = {
   };
   lines: string[];
 };
+
+// ---------------------------------------------------------------------------
+// MR Discussion / Note types — used by the comment follow-up feature.
+// ---------------------------------------------------------------------------
+
+export type GitLabNote = {
+  id: number;
+  body: string;
+  author: {
+    id: number;
+    username: string;
+    name: string;
+  };
+  created_at: string;
+  updated_at: string;
+  system: boolean;           // true for auto-generated notes (e.g., "merged", "assigned")
+  resolvable: boolean;
+  resolved: boolean;
+  position: GitLabNotePosition | null;
+};
+
+export type GitLabNotePosition = {
+  base_sha: string;
+  start_sha: string;
+  head_sha: string;
+  old_path: string;
+  new_path: string;
+  position_type: 'text' | 'image';
+  old_line: number | null;
+  new_line: number | null;
+  line_range: {
+    start: { line_code: string; type: 'new' | 'old'; new_line: number | null; old_line: number | null };
+    end: { line_code: string; type: 'new' | 'old'; new_line: number | null; old_line: number | null };
+  } | null;
+};
+
+export type GitLabDiscussion = {
+  id: string;
+  individual_note: boolean;  // true if this is a standalone note, not a thread
+  notes: GitLabNote[];
+};

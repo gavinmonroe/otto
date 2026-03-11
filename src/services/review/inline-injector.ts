@@ -14,6 +14,7 @@
 import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ThemeProvider } from '@/components/ThemeContext';
+import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { InlineCommentThread } from '@/components/review/InlineCommentThread';
 import { useReviewStore } from '@/services/review/review-store';
 import type { ReviewComment, ReviewCommentStatus } from '@/types/review';
@@ -58,10 +59,12 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
           mounted.root.render(
             createElement(ThemeProvider, {
               isDark: isDarkMode,
-              children: createElement(InlineCommentThread, {
-                comment,
-                onUpdateStatus: handleUpdateStatus,
-              }),
+              children: createElement(OttoErrorBoundary, { name: 'InlineComment' },
+                createElement(InlineCommentThread, {
+                  comment,
+                  onUpdateStatus: handleUpdateStatus,
+                }),
+              ),
             }),
           );
         }
@@ -128,10 +131,12 @@ function injectInlineComment(comment: ReviewComment, isDarkMode: boolean): void 
   root.render(
     createElement(ThemeProvider, {
       isDark: isDarkMode,
-      children: createElement(InlineCommentThread, {
-        comment,
-        onUpdateStatus: handleUpdateStatus,
-      }),
+      children: createElement(OttoErrorBoundary, { name: 'InlineComment' },
+        createElement(InlineCommentThread, {
+          comment,
+          onUpdateStatus: handleUpdateStatus,
+        }),
+      ),
     }),
   );
 

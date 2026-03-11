@@ -19,6 +19,7 @@ import { MrOverviewPanel } from '@/components/review/MrOverviewPanel';
 import { FileReviewCard } from '@/components/review/FileReviewCard';
 import { FileReviewFooter } from '@/components/review/FileReviewFooter';
 import { ThemeProvider } from '@/components/ThemeContext';
+import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { startInlineCommentInjection } from '@/services/review/inline-injector';
 import { startRelatedFilesSidebar } from '@/services/review/sidebar-injector';
 import { createElement } from 'react';
@@ -56,8 +57,8 @@ export default defineContentScript({
     // Inject related files into GitLab's sidebar file tree
     startRelatedFilesSidebar(isDarkMode, ctx.signal);
 
-    // Auto-review if the preference is enabled
-    await maybeAutoReview(mrContext);
+    // Load cached review or auto-review if preference is enabled
+    await loadOrAutoReview(mrContext);
 
     ctx.addEventListener(window, 'wxt:locationchange', async (event) => {
       const newUrlInfo = parseMrUrl(event.newUrl.href);
@@ -95,7 +96,7 @@ async function mountOverviewPanel(
       wrapper.setAttribute('data-otto-overview', 'true');
       container.append(wrapper);
       const root = createRoot(wrapper);
-      root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(MrOverviewPanel) }));
+      root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'Overview' }, createElement(MrOverviewPanel)) }));
       return root;
     },
     onRemove: (root) => root?.unmount(),
@@ -132,7 +133,7 @@ function mountFileReviewCard(
   shadow.appendChild(mountPoint);
 
   const root = createRoot(mountPoint);
-  root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(FileReviewCard, { filePath }) }));
+  root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'FileReview' }, createElement(FileReviewCard, { filePath })) }));
 
   ctx.signal.addEventListener('abort', () => {
     root.unmount();
@@ -172,7 +173,7 @@ function mountFileReviewFooter(
   shadow.appendChild(mountPoint);
 
   const root = createRoot(mountPoint);
-  root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(FileReviewFooter, { filePath }) }));
+  root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'FileFooter' }, createElement(FileReviewFooter, { filePath })) }));
 
   ctx.signal.addEventListener('abort', () => {
     root.unmount();
@@ -242,7 +243,7 @@ function getFooterResetStyles(): string {
 // user has enabled the preference and has an AI provider configured.
 // ---------------------------------------------------------------------------
 
-async function maybeAutoReview(mrContext: import('@/types/review').MrContext): Promise<void> {
+async function loadOrAutoReview(mrContext: import('@/types/review').MrContext): Promise<void> {
   // Try loading from cache first
   const cached = await tryLoadCachedReview(mrContext);
   if (cached) return; // Cache hit — no need to call AI

@@ -32,9 +32,16 @@ export function observeDiffFiles(
   function processDiffFile(el: Element) {
     const filePath = el.getAttribute('data-path');
     const fileHash = el.id;
-    // Use the hash as the dedup key (more stable than path for renames)
     const key = fileHash || filePath || '';
     if (!key || processed.has(key)) return;
+
+    // Also check if Otto is already injected (handles re-created elements
+    // that got a new hash but same path)
+    if (filePath && el.querySelector('[data-otto-file-review], [data-otto-file-footer]')) {
+      processed.add(key);
+      return;
+    }
+
     processed.add(key);
     if (filePath) {
       onFile(el, filePath);
@@ -46,6 +53,30 @@ export function observeDiffFiles(
     files.forEach(processDiffFile);
   }
 
+  /**
+   * Rescan for diff files that are missing Otto injections.
+   * Handles virtual scrolling re-creation and tab visibility changes
+   * where elements are destroyed and recreated without triggering mutations.
+   */
+  function rescanForMissing() {
+    const files = document.querySelectorAll('.diff-file.file-holder');
+    for (const el of files) {
+      const filePath = el.getAttribute('data-path');
+      if (!filePath) continue;
+
+      // Check if this element has Otto injections
+      const hasCard = el.querySelector('[data-otto-file-review]');
+      const hasFooter = el.querySelector('[data-otto-file-footer]');
+
+      if (!hasCard || !hasFooter) {
+        // Remove from processed so it gets re-injected
+        const key = el.id || filePath;
+        processed.delete(key);
+        processDiffFile(el);
+      }
+    }
+  }
+
   // Process files already in the DOM
   scanExisting();
 
@@ -54,24 +85,19 @@ export function observeDiffFiles(
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
         if (!(node instanceof Element)) continue;
-        // The added node itself might be a diff-file
         if (node.matches('.diff-file.file-holder')) {
           processDiffFile(node);
         }
-        // Or it might contain diff-files as descendants
         const nested = node.querySelectorAll('.diff-file.file-holder');
         nested.forEach(processDiffFile);
       }
     }
   });
 
-  // Observe the diff files holder if it exists, otherwise observe body
   const container = document.querySelector('.diff-files-holder') || document.body;
   observer.observe(container, { childList: true, subtree: true });
 
   // Handle virtual scrolling: files can be removed and re-added.
-  // When a file is removed, we remove it from `processed` so it gets
-  // re-processed when it's added back.
   const removalObserver = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of mutation.removedNodes) {
@@ -85,13 +111,27 @@ export function observeDiffFiles(
   });
   removalObserver.observe(container, { childList: true, subtree: true });
 
+  // Periodic rescan — catches virtual scrolling edge cases where
+  // elements are recreated without triggering mutation observers
+  const rescanInterval = setInterval(rescanForMissing, 3000);
+
+  // Rescan when tab becomes visible again — GitLab may re-render
+  const handleVisibility = () => {
+    if (document.visibilityState === 'visible') {
+      // Small delay to let GitLab finish re-rendering
+      setTimeout(rescanForMissing, 500);
+    }
+  };
+  document.addEventListener('visibilitychange', handleVisibility);
+
   function cleanup() {
     observer.disconnect();
     removalObserver.disconnect();
+    clearInterval(rescanInterval);
+    document.removeEventListener('visibilitychange', handleVisibility);
     processed.clear();
   }
 
-  // Auto-cleanup on abort signal (extension context invalidation)
   if (signal) {
     signal.addEventListener('abort', cleanup, { once: true });
   }

@@ -12,7 +12,7 @@
 //   is NOT synced across devices and is only accessible to this extension.
 // ---------------------------------------------------------------------------
 
-export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles';
+export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'followUp';
 
 export type GitLabHost = {
   id: string;
@@ -55,12 +55,14 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       codeReview: 'claude-sonnet-4-5',
       edgeCases: 'claude-sonnet-4-5',
       relatedFiles: 'claude-haiku-4-5',
+      followUp: 'claude-sonnet-4-5',
     },
     temperatures: {
       summary: 0.3,
       codeReview: 0.2,
       edgeCases: 0.4,
       relatedFiles: 0.1,
+      followUp: 0.3,
     },
   },
   gitlab: {
