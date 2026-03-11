@@ -13,11 +13,16 @@ import { createRoot } from 'react-dom/client';
 import { parseMrUrl, waitForDiffsTab, observeDiffFiles } from '@/lib/dom-observer';
 import { buildMrContext } from '@/services/gitlab/mr-parser';
 import { useReviewStore } from '@/services/review/review-store';
+import { loadSettings } from '@/lib/storage';
+import { sendMessage } from '@/lib/messaging';
+import { openStream } from '@/lib/messaging';
 import { MrOverviewPanel } from '@/components/review/MrOverviewPanel';
 import { FileReviewCard } from '@/components/review/FileReviewCard';
 import { FileReviewFooter } from '@/components/review/FileReviewFooter';
 import { ThemeProvider } from '@/components/ThemeContext';
 import { createElement } from 'react';
+import type { StreamChunk } from '@/types/messages';
+import type { ReviewTask } from '@/services/review/review-types';
 
 export default defineContentScript({
   matches: ['*://*/*'],
@@ -44,6 +49,9 @@ export default defineContentScript({
       mountFileReviewCard(ctx, fileElement, filePath, isDarkMode);
       mountFileReviewFooter(ctx, fileElement, filePath, isDarkMode);
     }, ctx.signal);
+
+    // Auto-review if the preference is enabled
+    await maybeAutoReview(mrContext);
 
     ctx.addEventListener(window, 'wxt:locationchange', async (event) => {
       const newUrlInfo = parseMrUrl(event.newUrl.href);
@@ -166,10 +174,6 @@ function mountFileReviewFooter(
   }, { once: true });
 }
 
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
-
 function detectDarkMode(): boolean {
   const body = document.body;
   const html = document.documentElement;
@@ -225,4 +229,72 @@ function getFooterResetStyles(): string {
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     button { font-family: inherit; }
   `;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-review — triggers a review automatically on page load if the
+// user has enabled the preference and has an AI provider configured.
+// ---------------------------------------------------------------------------
+
+async function maybeAutoReview(mrContext: import('@/types/review').MrContext): Promise<void> {
+  const settingsResult = await sendMessage({ type: 'GET_SETTINGS' });
+  if (!settingsResult.ok) return;
+
+  const settings = settingsResult.data;
+  if (!settings.preferences.autoReview) return;
+  if (!settings.ai.baseUrl) return;
+
+  // Determine which tasks to run
+  const hasGitLabHost = settings.gitlab.hosts.some(
+    (h) => mrContext.hostUrl.toLowerCase().startsWith(h.url.toLowerCase()),
+  );
+  const tasks: ReviewTask[] = ['summary', 'codeReview', 'edgeCases'];
+  if (hasGitLabHost) tasks.push('relatedFiles');
+
+  // Trigger the review via the store + streaming port
+  const store = useReviewStore.getState();
+  store.startReview(tasks);
+  store.setFileReviewsTotal(mrContext.diffFiles.length);
+
+  openStream(
+    { type: 'STREAM_REVIEW', payload: { mrContext, tasks } },
+    {
+      onChunk: (chunk: StreamChunk) => {
+        const s = useReviewStore.getState();
+        switch (chunk.type) {
+          case 'STREAM_SUMMARY_DELTA':
+            s.appendSummaryDelta(chunk.payload.content);
+            break;
+          case 'STREAM_SUMMARY_COMPLETE':
+            s.setSummary(chunk.payload.summary);
+            break;
+          case 'STREAM_FILE_REVIEW_DELTA':
+            s.appendFileReviewDelta(chunk.payload.filePath, chunk.payload.content);
+            break;
+          case 'STREAM_FILE_REVIEW_COMPLETE':
+            s.addFileReview(chunk.payload.fileReview);
+            break;
+          case 'STREAM_RELATED_FILES_COMPLETE':
+            s.setRelatedFiles(chunk.payload.files);
+            break;
+          case 'STREAM_EDGE_CASES_DELTA':
+            s.appendEdgeCasesDelta(chunk.payload.content);
+            break;
+          case 'STREAM_EDGE_CASES_COMPLETE':
+            s.setEdgeCases(chunk.payload.edgeCases);
+            break;
+          case 'STREAM_TASK_ERROR': {
+            const task = chunk.payload.task;
+            if (!task.startsWith('codeReview:')) {
+              s.setTaskStatus(task as ReviewTask, 'error', chunk.payload.error);
+            }
+            break;
+          }
+          case 'STREAM_ALL_COMPLETE':
+            s.completeReview();
+            break;
+        }
+      },
+    },
+  );
 }
