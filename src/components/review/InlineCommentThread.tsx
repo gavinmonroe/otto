@@ -14,12 +14,13 @@
 // ---------------------------------------------------------------------------
 
 import { useState } from 'react';
-import { ChevronRight, ChevronDown, AlertTriangle, AlertCircle, Lightbulb, Info } from 'lucide-react';
+import { ChevronRight, ChevronDown, AlertTriangle, AlertCircle, Lightbulb, Info, MessageSquare } from 'lucide-react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
 import { Markdown } from '@/components/Markdown';
 import { SuggestionDiff } from '@/components/SuggestionDiff';
 import { OttoLogo } from '@/components/OttoLogo';
 import type { ReviewComment, ReviewCommentStatus } from '@/types/review';
+import { useChatStore } from '@/services/chat/chat-store';
 
 type InlineCommentThreadProps = {
   comment: ReviewComment;
@@ -82,6 +83,13 @@ export function InlineCommentThread({ comment, onUpdateStatus }: InlineCommentTh
             >
               ✕
             </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); useChatStore.getState().askAboutComment(comment); }}
+              style={s.quickBtn}
+              title="Ask Otto about this"
+            >
+              <MessageSquare size={11} />
+            </button>
           </div>
         )}
       </button>
@@ -125,6 +133,20 @@ export function InlineCommentThread({ comment, onUpdateStatus }: InlineCommentTh
               >
                 Dismiss
               </button>
+              <button
+                onClick={() => useChatStore.getState().askAboutComment(comment)}
+                style={{ ...s.actionBtn, display: 'flex', alignItems: 'center', gap: '3px' }}
+                title="Ask Otto about this comment"
+              >
+                <MessageSquare size={11} />
+                Ask
+              </button>
+            </div>
+          )}
+
+          {comment.status === 'accepted' && comment.suggestionSummary && (
+            <div style={{ fontSize: '12px', color: theme.textSecondary, lineHeight: '1.4', marginTop: '6px' }}>
+              {comment.suggestionSummary}
             </div>
           )}
         </div>

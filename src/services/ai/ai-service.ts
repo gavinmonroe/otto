@@ -263,6 +263,7 @@ type RawFileReview = {
     body: string;
     originalCode: string | null;
     suggestion: string | null;
+    suggestionSummary: string | null;
   }>;
 };
 
@@ -318,6 +319,7 @@ export async function generateFileReview(
       body: c.body,
       originalCode: c.originalCode ?? null,
       suggestion: c.suggestion,
+      suggestionSummary: c.suggestionSummary ?? null,
       status: 'pending' as const,
       editedBody: null,
     })),

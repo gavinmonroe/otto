@@ -38,6 +38,7 @@ export type ReviewComment = {
   body: string;                // Detailed explanation (markdown)
   originalCode: string | null; // Code being replaced (for diff view)
   suggestion: string | null;   // Suggested code fix, if applicable
+  suggestionSummary: string | null; // Human-readable description of what the suggestion does
   status: ReviewCommentStatus;
   editedBody: string | null;   // User's edited version, if status === 'edited'
 };

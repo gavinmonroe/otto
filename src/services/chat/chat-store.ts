@@ -16,6 +16,7 @@
 
 import { create } from 'zustand';
 import type { ChatMessage, ChatStatus, SuggestedQuestion } from '@/types/chat';
+import type { ReviewComment } from '@/types/review';
 import type { CachedChat } from './chat-cache';
 import { generateId } from '@/lib/utils';
 
@@ -27,6 +28,8 @@ type ChatState = {
   suggestedQuestions: SuggestedQuestion[];
   isOpen: boolean;
   panelX: number | null;  // null = default position (right edge)
+  /** When set, the next message will include this comment as focused context. */
+  focusedComment: ReviewComment | null;
 };
 
 type ChatActions = {
@@ -49,6 +52,15 @@ type ChatActions = {
    */
   popMessagesAfter: (messageId: string) => void;
 
+  /**
+   * Open the chat panel with a specific review comment as context.
+   * Pre-fills the focused comment so the next message includes it.
+   */
+  askAboutComment: (comment: ReviewComment) => void;
+
+  /** Clear the focused comment (called after the message is sent). */
+  clearFocusedComment: () => void;
+
   // Cache hydration
   hydrateFromCache: (cached: CachedChat) => void;
 
@@ -64,6 +76,7 @@ const INITIAL_STATE: ChatState = {
   suggestedQuestions: [],
   isOpen: false,
   panelX: null,
+  focusedComment: null,
 };
 
 export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
@@ -133,4 +146,8 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
   }),
 
   reset: () => set(INITIAL_STATE),
+
+  askAboutComment: (comment) => set({ isOpen: true, focusedComment: comment }),
+
+  clearFocusedComment: () => set({ focusedComment: null }),
 }));

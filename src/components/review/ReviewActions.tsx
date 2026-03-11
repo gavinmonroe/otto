@@ -4,8 +4,10 @@
 // ---------------------------------------------------------------------------
 
 import { useState, useCallback } from 'react';
+import { MessageSquare } from 'lucide-react';
 import type { ReviewComment, ReviewCommentStatus } from '@/types/review';
 import { useTheme } from '@/components/ThemeContext';
+import { useChatStore } from '@/services/chat/chat-store';
 
 type ReviewActionsProps = {
   comment: ReviewComment;
@@ -19,7 +21,8 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
   const [copied, setCopied] = useState(false);
 
   const handleAccept = useCallback(async () => {
-    const textToCopy = comment.editedBody || comment.body;
+    // Copy the suggestion summary (human-readable) if available, otherwise fall back to body
+    const textToCopy = comment.suggestionSummary || comment.editedBody || comment.body;
     try {
       await navigator.clipboard.writeText(textToCopy);
       setCopied(true);
@@ -38,6 +41,10 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
     onUpdateStatus(comment.id, 'edited', editText);
     setIsEditing(false);
   }, [comment.id, editText, onUpdateStatus]);
+
+  const handleAskOtto = useCallback(() => {
+    useChatStore.getState().askAboutComment(comment);
+  }, [comment]);
 
   const btnBase: React.CSSProperties = {
     padding: '2px 8px',
@@ -59,9 +66,16 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
 
   if (comment.status === 'accepted') {
     return (
-      <span style={{ fontSize: '11px', color: theme.success, fontStyle: 'italic' }}>
-        {copied ? 'Copied to clipboard' : 'Accepted'}
-      </span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
+        <span style={{ fontSize: '11px', color: theme.success, fontStyle: 'italic' }}>
+          {copied ? 'Copied to clipboard' : 'Accepted'}
+        </span>
+        {comment.suggestionSummary && (
+          <span style={{ fontSize: '12px', color: theme.textSecondary, lineHeight: '1.4' }}>
+            {comment.suggestionSummary}
+          </span>
+        )}
+      </div>
     );
   }
 
@@ -115,6 +129,14 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
         onClick={handleDismiss}
       >
         Dismiss
+      </button>
+      <button
+        style={{ ...btnBase, display: 'flex', alignItems: 'center', gap: '3px' }}
+        onClick={handleAskOtto}
+        title="Ask Otto about this comment"
+      >
+        <MessageSquare size={11} />
+        Ask
       </button>
     </div>
   );

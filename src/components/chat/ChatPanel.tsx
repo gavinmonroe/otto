@@ -35,8 +35,10 @@ export function ChatPanel() {
     suggestedQuestions,
     isOpen,
     panelX,
+    focusedComment,
     setOpen,
     setPanelX,
+    clearFocusedComment,
   } = useChatStore();
 
   const [inputValue, setInputValue] = useState('');
@@ -58,6 +60,14 @@ export function ChatPanel() {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen]);
+
+  // When a focused comment is set, pre-fill the input with a starter question
+  useEffect(() => {
+    if (focusedComment && isOpen) {
+      setInputValue(`What does this suggestion do and is it the right approach?`);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [focusedComment, isOpen]);
 
   // ---------------------------------------------------------------------------
   // Send message
@@ -160,6 +170,7 @@ export function ChatPanel() {
         <button
           onClick={() => {
             cancelChatStream();
+            clearFocusedComment();
             setOpen(false);
           }}
           style={s.iconButton}
@@ -168,6 +179,33 @@ export function ChatPanel() {
           <X size={14} />
         </button>
       </div>
+
+      {/* Focused comment banner */}
+      {focusedComment && (
+        <div style={{
+          padding: '6px 14px',
+          background: theme.isDark ? '#1e3a5f' : '#eff6ff',
+          borderBottom: `1px solid ${theme.borderSubtle}`,
+          fontSize: '12px',
+          color: theme.textSecondary,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+        }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Asking about: <span style={{ color: theme.text, fontWeight: 500 }}>{focusedComment.title}</span>
+            <span style={{ color: theme.textMuted }}> in {focusedComment.filePath}{focusedComment.startLine ? `:${focusedComment.startLine}` : ''}</span>
+          </span>
+          <button
+            onClick={clearFocusedComment}
+            style={{ ...s.iconButton, flexShrink: 0 }}
+            title="Remove context"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       {/* Messages area */}
       <div style={s.messagesArea}>

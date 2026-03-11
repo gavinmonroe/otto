@@ -17,6 +17,7 @@ import { useReviewStore } from '@/services/review/review-store';
 import { openStream } from '@/lib/messaging';
 import { saveCachedChat, loadCachedChat } from './chat-cache';
 import type { StreamChunk, ChatReviewContext } from '@/types/messages';
+import type { ReviewComment } from '@/types/review';
 
 // ---------------------------------------------------------------------------
 // Delta batching
@@ -132,12 +133,18 @@ export function sendChatMessage(question: string): boolean {
 
   const chatStore = useChatStore.getState();
 
+  // Capture and clear focused comment before sending
+  const focusedComment = chatStore.focusedComment;
+  if (focusedComment) {
+    chatStore.clearFocusedComment();
+  }
+
   // Add user message and get conversation history (excluding the new message)
   // We need the history BEFORE adding the new message
   const history = [...chatStore.messages];
   chatStore.addUserMessage(question);
 
-  startChatStream(question, history, reviewContext);
+  startChatStream(question, history, reviewContext, focusedComment);
   return true;
 }
 
@@ -180,17 +187,44 @@ export function retryChatMessage(): boolean {
 
 /**
  * Internal: open the stream and wire up chunk dispatching.
+ *
+ * When a focusedComment is provided, the question sent to the AI is enriched
+ * with the comment's context. The user's displayed message stays clean —
+ * the enrichment only goes to the AI.
  */
 function startChatStream(
   question: string,
   history: import('@/types/chat').ChatMessage[],
   reviewContext: ChatReviewContext,
+  focusedComment?: ReviewComment | null,
 ): void {
+  // Enrich the question with focused comment context for the AI
+  let aiQuestion = question;
+  if (focusedComment) {
+    const parts = [
+      `[Context: Otto review comment on ${focusedComment.filePath}`,
+      focusedComment.startLine ? ` line ${focusedComment.startLine}` : '',
+      ` — ${focusedComment.severity}/${focusedComment.category}]`,
+      `\nTitle: ${focusedComment.title}`,
+      `\nBody: ${focusedComment.body}`,
+    ];
+    if (focusedComment.suggestion) {
+      parts.push(`\nSuggested code:\n\`\`\`\n${focusedComment.suggestion}\n\`\`\``);
+    }
+    if (focusedComment.suggestionSummary) {
+      parts.push(`\nSuggestion summary: ${focusedComment.suggestionSummary}`);
+    }
+    if (focusedComment.originalCode) {
+      parts.push(`\nOriginal code:\n\`\`\`\n${focusedComment.originalCode}\n\`\`\``);
+    }
+    aiQuestion = `${parts.join('')}\n\nUser question: ${question}`;
+  }
+
   activeDisconnect = openStream(
     {
       type: 'STREAM_CHAT',
       payload: {
-        question,
+        question: aiQuestion,
         history,
         reviewContext,
       },

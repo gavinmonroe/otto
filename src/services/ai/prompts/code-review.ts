@@ -31,7 +31,8 @@ Respond with a JSON object matching this exact schema:
       "title": "string — one-line summary of the issue",
       "body": "string — state the risk, not just the symptom. A pointed question beats a paragraph of explanation. Use markdown.",
       "originalCode": "string | null — exact original code being replaced, copied verbatim from the diff/file",
-      "suggestion": "string | null — concrete replacement code, not vague advice"
+      "suggestion": "string | null — concrete replacement code, not vague advice",
+      "suggestionSummary": "string | null — when suggestion is provided, a plain-English sentence describing what the change does and why, written for a developer skimming quickly. e.g. 'Adds a null check for user before accessing .email to prevent TypeError in unauthenticated requests.'"
     }
   ]
 }
