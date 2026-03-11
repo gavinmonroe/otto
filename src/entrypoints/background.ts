@@ -21,6 +21,7 @@ import { loadSettings, saveSettings } from '@/lib/storage';
 import * as gitlab from '@/services/gitlab/gitlab-client';
 import * as aiClient from '@/services/ai/ai-client';
 import { executeReview } from '@/services/review/review-orchestrator';
+import { highlight, highlightLines } from '@/services/syntax/highlighter';
 import { normalizeUrl } from '@/lib/utils';
 
 export default defineBackground(() => {
@@ -118,6 +119,24 @@ export default defineBackground(() => {
         return { ok: true, data: undefined };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : 'Failed to open options' };
+      }
+    },
+
+    HIGHLIGHT_CODE: async (payload) => {
+      try {
+        const html = await highlight(payload.code, payload.lang, payload.isDark);
+        return { ok: true, data: html };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Highlight failed' };
+      }
+    },
+
+    HIGHLIGHT_LINES: async (payload) => {
+      try {
+        const htmlLines = await highlightLines(payload.lines, payload.lang, payload.isDark);
+        return { ok: true, data: htmlLines };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Highlight lines failed' };
       }
     },
   };

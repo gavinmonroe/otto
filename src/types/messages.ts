@@ -98,6 +98,16 @@ export type OpenOptionsMessage = {
   type: 'OPEN_OPTIONS';
 };
 
+export type HighlightCodeMessage = {
+  type: 'HIGHLIGHT_CODE';
+  payload: { code: string; lang: string | null; isDark: boolean };
+};
+
+export type HighlightLinesMessage = {
+  type: 'HIGHLIGHT_LINES';
+  payload: { lines: string[]; lang: string | null; isDark: boolean };
+};
+
 export type RequestMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
@@ -110,7 +120,9 @@ export type RequestMessage =
   | FetchAiModelsMessage
   | TestAiConnectionMessage
   | TestGitLabConnectionMessage
-  | OpenOptionsMessage;
+  | OpenOptionsMessage
+  | HighlightCodeMessage
+  | HighlightLinesMessage;
 
 // ---------------------------------------------------------------------------
 // Response map — maps each request type to its response type.
@@ -129,6 +141,8 @@ export type MessageResponseMap = {
   TEST_AI_CONNECTION: Result<{ model: string }>;
   TEST_GITLAB_CONNECTION: Result<{ username: string }>;
   OPEN_OPTIONS: Result<void>;
+  HIGHLIGHT_CODE: Result<string>;
+  HIGHLIGHT_LINES: Result<string[]>;
 };
 
 // ---------------------------------------------------------------------------

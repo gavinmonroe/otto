@@ -14,7 +14,7 @@ import { ExternalLink, Eye, EyeOff, FileCode } from 'lucide-react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
 import { useReviewStore } from '@/services/review/review-store';
 import { sendMessage } from '@/lib/messaging';
-import { highlight, extToLang } from '@/services/syntax/highlighter';
+import { highlight, extToLang } from '@/services/syntax/highlight-client';
 
 type GitLabFileLinkProps = {
   filePath: string;

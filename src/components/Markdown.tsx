@@ -18,7 +18,7 @@ import remarkGfm from 'remark-gfm';
 import { useTheme } from '@/components/ThemeContext';
 import type { OttoTheme } from '@/components/ThemeContext';
 import type { Components } from 'react-markdown';
-import { highlight } from '@/services/syntax/highlighter';
+import { highlight } from '@/services/syntax/highlight-client';
 
 type MarkdownProps = {
   content: string;

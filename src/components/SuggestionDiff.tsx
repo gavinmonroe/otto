@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
-import { highlightLines, extToLang } from '@/services/syntax/highlighter';
+import { highlightLines, extToLang } from '@/services/syntax/highlight-client';
 
 type SuggestionDiffProps = {
   originalCode: string;
