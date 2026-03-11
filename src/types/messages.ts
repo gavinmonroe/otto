@@ -218,6 +218,7 @@ export type StreamChunk =
   | { type: 'STREAM_RELATED_FILES_COMPLETE'; payload: { files: RelatedFile[] } }
   | { type: 'STREAM_EDGE_CASES_DELTA'; payload: { content: string } }
   | { type: 'STREAM_EDGE_CASES_COMPLETE'; payload: { edgeCases: EdgeCase[] } }
+  | { type: 'STREAM_TICKET_CONTEXT'; payload: { ticketContext: string; ticketKeys: string[] } }
   | { type: 'STREAM_PROGRESS'; payload: { message: string } }
   | { type: 'STREAM_TASK_ERROR'; payload: { task: string; error: string } }
   | { type: 'STREAM_ALL_COMPLETE' };

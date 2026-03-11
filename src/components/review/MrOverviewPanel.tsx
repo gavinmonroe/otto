@@ -165,12 +165,42 @@ export function MrOverviewPanel() {
           {review.summary ? (
             <div style={{ fontSize: '13px' }}>
               <Markdown content={review.summary.overview} compact />
-              <div style={{ fontSize: '12px', color: theme.textSecondary, marginBottom: '6px' }}>
+              {review.summary.keyChanges.length > 0 && (
+                <div style={{ marginTop: '4px' }}>
+                  <Markdown content={review.summary.keyChanges.map((c) => `- ${c}`).join('\n')} compact />
+                </div>
+              )}
+              {review.summary.affectedAreas.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+                  {review.summary.affectedAreas.map((area, i) => (
+                    <span key={i} style={{
+                      fontSize: '11px',
+                      padding: '2px 8px',
+                      borderRadius: '10px',
+                      background: theme.isDark ? '#1e293b' : '#f1f5f9',
+                      color: theme.textSecondary,
+                      border: `1px solid ${theme.borderSubtle}`,
+                    }}>
+                      {area}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div style={{
+                fontSize: '12px',
+                color: theme.textSecondary,
+                marginTop: '6px',
+                padding: '4px 8px',
+                background: theme.bgSubtle,
+                borderRadius: '4px',
+                borderLeft: `3px solid ${
+                  review.summary.riskAssessment.toLowerCase().includes('high') ? theme.error
+                  : review.summary.riskAssessment.toLowerCase().includes('medium') ? theme.warning
+                  : theme.success
+                }`,
+              }}>
                 <Markdown content={review.summary.riskAssessment} compact />
               </div>
-              {review.summary.keyChanges.length > 0 && (
-                <Markdown content={review.summary.keyChanges.map((c) => `- ${c}`).join('\n')} compact />
-              )}
             </div>
           ) : (
             <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap' }}>
@@ -178,6 +208,18 @@ export function MrOverviewPanel() {
               <span style={{ color: theme.brand }}>|</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Linked Tickets */}
+      {review.ticketKeys.length > 0 && review.ticketContext && (
+        <div style={s.section}>
+          <div style={s.sectionHeader}>
+            Linked Tickets ({review.ticketKeys.join(', ')})
+          </div>
+          <div style={{ fontSize: '12px' }}>
+            <Markdown content={review.ticketContext} compact />
+          </div>
         </div>
       )}
 

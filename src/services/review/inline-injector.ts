@@ -103,10 +103,10 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   const domObserver = new MutationObserver(() => {
-    if (pendingComments.size === 0) return;
     if (retryTimer) return; // Already scheduled
     retryTimer = setTimeout(() => {
       retryTimer = null;
+      pruneDetachedComments();
       retryPendingComments(isDarkMode);
     }, 150);
   });
@@ -114,10 +114,30 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
   const container = document.querySelector('.diff-files-holder') || document.body;
   domObserver.observe(container, { childList: true, subtree: true });
 
+  // Periodic rescan — catches virtual scrolling edge cases where GitLab
+  // destroys and recreates diff rows without triggering useful mutations.
+  const rescanInterval = setInterval(() => {
+    pruneDetachedComments();
+    retryPendingComments(isDarkMode);
+  }, 3000);
+
+  // Rescan when tab becomes visible — GitLab may re-render diffs
+  const handleVisibility = () => {
+    if (document.visibilityState === 'visible') {
+      setTimeout(() => {
+        pruneDetachedComments();
+        retryPendingComments(isDarkMode);
+      }, 500);
+    }
+  };
+  document.addEventListener('visibilitychange', handleVisibility);
+
   function cleanup() {
     unsubscribe();
     statusUnsubscribe();
     domObserver.disconnect();
+    clearInterval(rescanInterval);
+    document.removeEventListener('visibilitychange', handleVisibility);
     if (retryTimer) clearTimeout(retryTimer);
     // Unmount all inline comments
     for (const [id, { root, container }] of mountedComments) {
@@ -137,6 +157,29 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
 
 function handleUpdateStatus(commentId: string, status: ReviewCommentStatus) {
   useReviewStore.getState().updateCommentStatus(commentId, status);
+}
+
+/**
+ * Prune mounted comments whose DOM containers were destroyed by GitLab's
+ * virtual scrolling. Re-queues them as pending so they get re-injected
+ * when the diff row reappears.
+ */
+function pruneDetachedComments(): void {
+  for (const [id, { root, container }] of mountedComments) {
+    if (!container.isConnected) {
+      root.unmount();
+      mountedComments.delete(id);
+      // Re-queue from the store so it gets re-injected
+      const state = useReviewStore.getState();
+      for (const fr of state.fileReviews) {
+        const comment = fr.comments.find((c) => c.id === id);
+        if (comment && comment.startLine) {
+          pendingComments.set(id, comment);
+          break;
+        }
+      }
+    }
+  }
 }
 
 /**

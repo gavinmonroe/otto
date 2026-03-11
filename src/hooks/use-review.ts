@@ -72,6 +72,8 @@ export function useReview() {
     relatedFiles: store.relatedFiles,
     edgeCases: store.edgeCases,
     edgeCasesDelta: store.edgeCasesDelta,
+    ticketContext: store.ticketContext,
+    ticketKeys: store.ticketKeys,
     startReview,
     regenerateReview,
     cancelReview,

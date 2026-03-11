@@ -111,6 +111,9 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
       }
       s.setEdgeCases(chunk.payload.edgeCases);
       break;
+    case 'STREAM_TICKET_CONTEXT':
+      s.setTicketContext(chunk.payload.ticketContext, chunk.payload.ticketKeys);
+      break;
     case 'STREAM_PROGRESS':
       s.setProgressMessage(chunk.payload.message);
       break;

@@ -232,7 +232,16 @@ async function fetchTicketContext(
 
   if (tickets.size === 0) return null;
 
-  return formatTicketContext(tickets);
+  const resolvedKeys = Array.from(tickets.keys());
+  const formatted = formatTicketContext(tickets);
+
+  // Send ticket context to the UI so it's visible to the user
+  send({
+    type: 'STREAM_TICKET_CONTEXT',
+    payload: { ticketContext: formatted, ticketKeys: resolvedKeys },
+  });
+
+  return formatted;
 }
 
 function formatTicketContext(tickets: Map<string, TicketInfo>): string {

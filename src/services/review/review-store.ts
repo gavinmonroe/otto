@@ -54,6 +54,10 @@ type ReviewState = {
   edgeCases: EdgeCase[];
   edgeCasesDelta: string;         // Streaming accumulator for edge cases
 
+  // Ticket context (from Jira etc.)
+  ticketContext: string | null;
+  ticketKeys: string[];
+
   // Timestamps
   startedAt: number | null;
   completedAt: number | null;
@@ -94,6 +98,9 @@ type ReviewActions = {
   appendEdgeCasesDelta: (content: string) => void;
   setEdgeCases: (edgeCases: EdgeCase[]) => void;
 
+  // Ticket context
+  setTicketContext: (ticketContext: string, ticketKeys: string[]) => void;
+
   // Task progress
   setTaskStatus: (task: ReviewTask, status: ReviewProgress[ReviewTask]['status'], error?: string) => void;
 
@@ -120,6 +127,8 @@ const INITIAL_STATE: ReviewState = {
   relatedFiles: [],
   edgeCases: [],
   edgeCasesDelta: '',
+  ticketContext: null,
+  ticketKeys: [],
   startedAt: null,
   completedAt: null,
   followUps: {},
@@ -274,6 +283,11 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
       edgeCases: { ...state.progress.edgeCases, status: 'complete' },
     },
   })),
+
+  setTicketContext: (ticketContext, ticketKeys) => set({
+    ticketContext,
+    ticketKeys,
+  }),
 
   // Task progress — also clears delta for the failed task
   setTaskStatus: (task, status, error) => set((state) => {

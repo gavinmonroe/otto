@@ -105,7 +105,14 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
           </button>
           {showTrace && (
             <div style={{ marginTop: '6px' }}>
-              <Markdown content={`\`\`\`\n${edgeCase.hypotheticalTrace}\n\`\`\``} compact />
+              <Markdown
+                content={
+                  edgeCase.hypotheticalTrace.includes('```')
+                    ? edgeCase.hypotheticalTrace
+                    : `\`\`\`\n${edgeCase.hypotheticalTrace}\n\`\`\``
+                }
+                compact
+              />
             </div>
           )}
         </>
