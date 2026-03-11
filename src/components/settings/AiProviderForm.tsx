@@ -5,7 +5,7 @@
 // and per-task model selection with temperature controls.
 // ---------------------------------------------------------------------------
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { OttoSettings, AiTaskType } from '@/types/settings';
 import { sendMessage } from '@/lib/messaging';
 
@@ -101,8 +101,8 @@ export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {
       </p>
 
       {(Object.keys(TASK_LABELS) as AiTaskType[]).map((task) => (
-        <div key={task} style={{ ...fieldStyle, display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
-          <div style={{ flex: 2 }}>
+        <div key={task} style={{ ...fieldStyle, display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 2, minWidth: '180px' }}>
             <label style={labelStyle}>{TASK_LABELS[task]} — Model</label>
             {availableModels.length > 0 ? (
               <select
@@ -131,7 +131,7 @@ export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {
               />
             )}
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: '80px' }}>
             <label style={labelStyle}>Temperature</label>
             <input
               type="number"
@@ -143,6 +143,14 @@ export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {
                 temperatures: { ...settings.ai.temperatures, [task]: parseFloat(e.target.value) || 0 },
               })}
               style={inputStyle}
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: '140px' }}>
+            <MaxTokensSlider
+              value={settings.ai.maxTokens?.[task] ?? 0}
+              onChange={(value) => onUpdate({
+                maxTokens: { ...settings.ai.maxTokens, [task]: value },
+              })}
             />
           </div>
         </div>
@@ -214,3 +222,54 @@ export const testButtonStyle: React.CSSProperties = {
   fontWeight: 500,
   cursor: 'pointer',
 };
+
+// ---------------------------------------------------------------------------
+// MaxTokensSlider — range slider from 0 (none) to 256k
+// ---------------------------------------------------------------------------
+
+const MAX_TOKENS_STEPS = [
+  0, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144,
+];
+
+function formatTokens(value: number): string {
+  if (value === 0) return 'None';
+  if (value >= 1024) return `${Math.round(value / 1024)}k`;
+  return String(value);
+}
+
+function MaxTokensSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  // Find the closest step index for the current value
+  const stepIndex = useMemo(() => {
+    let closest = 0;
+    let minDist = Math.abs(MAX_TOKENS_STEPS[0] - value);
+    for (let i = 1; i < MAX_TOKENS_STEPS.length; i++) {
+      const dist = Math.abs(MAX_TOKENS_STEPS[i] - value);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = i;
+      }
+    }
+    return closest;
+  }, [value]);
+
+  return (
+    <div>
+      <label style={labelStyle}>
+        Max Tokens: <span style={{ fontWeight: 600 }}>{formatTokens(value)}</span>
+      </label>
+      <input
+        type="range"
+        min={0}
+        max={MAX_TOKENS_STEPS.length - 1}
+        step={1}
+        value={stepIndex}
+        onChange={(e) => onChange(MAX_TOKENS_STEPS[parseInt(e.target.value, 10)])}
+        style={{ width: '100%', cursor: 'pointer' }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#9ca3af' }}>
+        <span>None</span>
+        <span>256k</span>
+      </div>
+    </div>
+  );
+}

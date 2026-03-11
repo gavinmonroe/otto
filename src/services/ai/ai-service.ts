@@ -57,6 +57,16 @@ function getTemperature(aiConfig: AiConfig, task: AiTaskType): number {
 }
 
 /**
+ * Get max_tokens for a task. Returns undefined if set to 0 (not set),
+ * which tells the AI client to omit the parameter entirely and let
+ * the model/provider use its default.
+ */
+function getMaxTokens(aiConfig: AiConfig, task: AiTaskType): number | undefined {
+  const value = aiConfig.maxTokens?.[task];
+  return value && value > 0 ? value : undefined;
+}
+
+/**
  * Extract JSON from an AI response that might be wrapped in markdown fences.
  * AI models sometimes respond with ```json ... ``` despite instructions not to.
  */
@@ -74,18 +84,98 @@ function extractJson(text: string): string {
 
 /**
  * Safely parse JSON from AI response with error context.
+ * If standard parsing fails, attempts to repair truncated JSON
+ * (common when the model hits max_tokens mid-response).
  */
 function parseAiJson<T>(text: string, context: string): Result<T> {
+  const json = extractJson(text);
+
+  // Try standard parse first
   try {
-    const json = extractJson(text);
     const parsed = JSON.parse(json) as T;
     return { ok: true, data: parsed };
-  } catch (error) {
-    return {
-      ok: false,
-      error: `Failed to parse AI response for ${context}: ${error instanceof Error ? error.message : 'Invalid JSON'}`,
-    };
+  } catch {
+    // Fall through to repair attempt
   }
+
+  // Try to repair truncated JSON — the model likely hit max_tokens
+  const repaired = repairTruncatedJson(json);
+  if (repaired) {
+    try {
+      const parsed = JSON.parse(repaired) as T;
+      return { ok: true, data: parsed };
+    } catch {
+      // Repair didn't produce valid JSON either
+    }
+  }
+
+  return {
+    ok: false,
+    error: `Failed to parse AI response for ${context}: Unterminated JSON (response may have been truncated). Try regenerating.`,
+  };
+}
+
+/**
+ * Attempt to repair truncated JSON by closing open brackets/braces/strings.
+ *
+ * Common truncation patterns from AI models:
+ * - Array cut mid-object: `[{"a":1},{"b":2` → close string, object, array
+ * - String cut mid-value: `[{"a":"hello wor` → close string, object, array
+ * - Object cut mid-key: `[{"a":1,"b` → drop incomplete key, close object, array
+ *
+ * Strategy: find the last complete array element (ends with `}`), truncate
+ * everything after it, and close the array. This gives us all fully-formed
+ * items even if the last one was cut off.
+ */
+function repairTruncatedJson(json: string): string | null {
+  const trimmed = json.trim();
+
+  // Only attempt repair on arrays (edge cases, related files, etc.)
+  if (!trimmed.startsWith('[')) return null;
+
+  // Find the last complete object in the array — look for `}` followed by
+  // either `,` or whitespace (but not inside a string).
+  // Walk backwards to find the last `}` that closes a top-level array element.
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let lastCompleteObjectEnd = -1;
+
+  for (let i = 1; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === '\\' && inString) {
+      escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === '{' || ch === '[') {
+      depth++;
+    } else if (ch === '}' || ch === ']') {
+      depth--;
+      // depth === 0 means we just closed a top-level array element
+      if (depth === 0 && ch === '}') {
+        lastCompleteObjectEnd = i;
+      }
+    }
+  }
+
+  if (lastCompleteObjectEnd === -1) return null;
+
+  // Truncate after the last complete object and close the array
+  return trimmed.slice(0, lastCompleteObjectEnd + 1) + ']';
 }
 
 // ---------------------------------------------------------------------------
@@ -106,12 +196,13 @@ export async function generateSummary(
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'summary');
   const temperature = getTemperature(aiConfig, 'summary');
+  const max_tokens = getMaxTokens(aiConfig, 'summary');
 
   if (onDelta) {
     // Streaming mode: collect full text while yielding deltas
     let fullText = '';
     try {
-      const stream = chatCompletionStream(config, { model, messages, temperature }, signal);
+      const stream = chatCompletionStream(config, { model, messages, temperature, max_tokens }, signal);
       for await (const chunk of stream) {
         fullText += chunk;
         onDelta(chunk);
@@ -122,7 +213,7 @@ export async function generateSummary(
     return parseAiJson<MrSummary>(fullText, 'summary');
   } else {
     // Non-streaming mode
-    const result = await chatCompletion(config, { model, messages, temperature });
+    const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
     if (!result.ok) return result;
     const content = result.data.choices[0]?.message?.content || '';
     return parseAiJson<MrSummary>(content, 'summary');
@@ -161,12 +252,13 @@ export async function generateFileReview(
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'codeReview');
   const temperature = getTemperature(aiConfig, 'codeReview');
+  const max_tokens = getMaxTokens(aiConfig, 'codeReview');
 
   let fullText = '';
 
   if (onDelta) {
     try {
-      const stream = chatCompletionStream(config, { model, messages, temperature }, signal);
+      const stream = chatCompletionStream(config, { model, messages, temperature, max_tokens }, signal);
       for await (const chunk of stream) {
         fullText += chunk;
         onDelta(chunk);
@@ -175,7 +267,7 @@ export async function generateFileReview(
       return { ok: false, error: error instanceof Error ? error.message : 'Code review stream failed' };
     }
   } else {
-    const result = await chatCompletion(config, { model, messages, temperature });
+    const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
     if (!result.ok) return result;
     fullText = result.data.choices[0]?.message?.content || '';
   }
@@ -234,12 +326,13 @@ export async function generateEdgeCases(
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'edgeCases');
   const temperature = getTemperature(aiConfig, 'edgeCases');
+  const max_tokens = getMaxTokens(aiConfig, 'edgeCases');
 
   let fullText = '';
 
   if (onDelta) {
     try {
-      const stream = chatCompletionStream(config, { model, messages, temperature }, signal);
+      const stream = chatCompletionStream(config, { model, messages, temperature, max_tokens }, signal);
       for await (const chunk of stream) {
         fullText += chunk;
         onDelta(chunk);
@@ -248,7 +341,7 @@ export async function generateEdgeCases(
       return { ok: false, error: error instanceof Error ? error.message : 'Edge case stream failed' };
     }
   } else {
-    const result = await chatCompletion(config, { model, messages, temperature });
+    const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
     if (!result.ok) return result;
     fullText = result.data.choices[0]?.message?.content || '';
   }
@@ -309,8 +402,9 @@ export async function discoverRelatedFiles(
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'relatedFiles');
   const temperature = getTemperature(aiConfig, 'relatedFiles');
+  const max_tokens = getMaxTokens(aiConfig, 'relatedFiles');
 
-  const result = await chatCompletion(config, { model, messages, temperature });
+  const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
   if (!result.ok) return result;
 
   const content = result.data.choices[0]?.message?.content || '';
@@ -344,8 +438,9 @@ export async function generateFollowUp(
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'followUp');
   const temperature = getTemperature(aiConfig, 'followUp');
+  const max_tokens = getMaxTokens(aiConfig, 'followUp');
 
-  const result = await chatCompletion(config, { model, messages, temperature });
+  const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
   if (!result.ok) return result;
 
   const content = result.data.choices[0]?.message?.content || '';

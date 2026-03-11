@@ -26,6 +26,7 @@ export type AiConfig = {
   apiKey: string;
   models: Record<AiTaskType, string>;
   temperatures: Record<AiTaskType, number>;
+  maxTokens: Record<AiTaskType, number>;  // 0 = not set (let model/provider decide)
 };
 
 export type Preferences = {
@@ -63,6 +64,13 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       edgeCases: 0.4,
       relatedFiles: 0.1,
       followUp: 0.3,
+    },
+    maxTokens: {
+      summary: 0,
+      codeReview: 0,
+      edgeCases: 16384,
+      relatedFiles: 0,
+      followUp: 0,
     },
   },
   gitlab: {

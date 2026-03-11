@@ -9,6 +9,8 @@
 //   dismissed comments.
 // - Subscribes to the review store and reacts to new file reviews.
 // - Handles both inline (unified) and parallel diff views.
+// - Retries failed injections when new DOM elements appear (handles cache
+//   hydration where reviews arrive before diff elements are rendered).
 // ---------------------------------------------------------------------------
 
 import { createElement } from 'react';
@@ -24,6 +26,9 @@ const INJECTED_ATTR = 'data-otto-inline-comment';
 /** Track mounted inline comments for cleanup */
 const mountedComments = new Map<string, { root: Root; container: HTMLElement }>();
 
+/** Track comments that failed to inject because the DOM wasn't ready */
+const pendingComments = new Map<string, ReviewComment>();
+
 /**
  * Start watching the review store for completed file reviews and inject
  * inline comments into the diff DOM as they arrive.
@@ -32,6 +37,19 @@ const mountedComments = new Map<string, { root: Root; container: HTMLElement }>(
  */
 export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortSignal): () => void {
   let lastFileReviewCount = 0;
+
+  // Process any reviews already in the store (e.g., from cache hydration)
+  const initialState = useReviewStore.getState();
+  if (initialState.fileReviews.length > 0) {
+    lastFileReviewCount = initialState.fileReviews.length;
+    for (const fileReview of initialState.fileReviews) {
+      for (const comment of fileReview.comments) {
+        if (comment.startLine) {
+          injectInlineComment(comment, isDarkMode);
+        }
+      }
+    }
+  }
 
   const unsubscribe = useReviewStore.subscribe((state) => {
     // Only act when new file reviews arrive
@@ -72,15 +90,29 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
     }
   });
 
+  // Watch for new diff file elements appearing in the DOM.
+  // When cache hydration happens before diff elements are rendered,
+  // comments go into pendingComments. This observer retries them
+  // when new .diff-file elements appear.
+  const domObserver = new MutationObserver(() => {
+    if (pendingComments.size === 0) return;
+    retryPendingComments(isDarkMode);
+  });
+
+  const container = document.querySelector('.diff-files-holder') || document.body;
+  domObserver.observe(container, { childList: true, subtree: true });
+
   function cleanup() {
     unsubscribe();
     statusUnsubscribe();
+    domObserver.disconnect();
     // Unmount all inline comments
     for (const [id, { root, container }] of mountedComments) {
       root.unmount();
       container.remove();
       mountedComments.delete(id);
     }
+    pendingComments.clear();
   }
 
   if (signal) {
@@ -95,6 +127,19 @@ function handleUpdateStatus(commentId: string, status: ReviewCommentStatus) {
 }
 
 /**
+ * Retry injecting comments that previously failed because the DOM wasn't ready.
+ */
+function retryPendingComments(isDarkMode: boolean): void {
+  for (const [id, comment] of pendingComments) {
+    const fileElement = findDiffFileElement(comment.filePath);
+    if (fileElement) {
+      pendingComments.delete(id);
+      injectInlineComment(comment, isDarkMode);
+    }
+  }
+}
+
+/**
  * Inject a single inline comment after the referenced line in the diff.
  */
 function injectInlineComment(comment: ReviewComment, isDarkMode: boolean): void {
@@ -103,11 +148,22 @@ function injectInlineComment(comment: ReviewComment, isDarkMode: boolean): void 
 
   // Find the diff file element
   const fileElement = findDiffFileElement(comment.filePath);
-  if (!fileElement) return;
+  if (!fileElement) {
+    // DOM not ready yet — queue for retry when the element appears
+    pendingComments.set(comment.id, comment);
+    return;
+  }
 
   // Find the line row
   const lineRow = findLineRow(fileElement, comment.startLine);
-  if (!lineRow) return;
+  if (!lineRow) {
+    // Line row not found — queue for retry (virtual scrolling may load it later)
+    pendingComments.set(comment.id, comment);
+    return;
+  }
+
+  // Remove from pending if it was queued
+  pendingComments.delete(comment.id);
 
   // Create the container — a full-width row inserted after the line
   const container = document.createElement('div');

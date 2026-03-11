@@ -192,18 +192,25 @@ export function MrOverviewPanel() {
       )}
 
       {/* Edge Cases (collapsible) */}
-      {(review.edgeCases.length > 0 || review.edgeCasesDelta) && (
+      {(review.edgeCases.length > 0 || review.edgeCasesDelta || review.progress.edgeCases.status === 'error') && (
         <div style={s.section}>
           <button onClick={() => setShowEdgeCases(!showEdgeCases)} style={s.collapsibleHeader}>
             <span>
               {showEdgeCases ? '▾' : '▸'} Edge Cases
               {review.edgeCases.length > 0
                 ? ` (${review.edgeCases.length})`
-                : review.edgeCasesDelta ? ' (analyzing...)' : ''}
+                : review.progress.edgeCases.status === 'error'
+                  ? ' (failed)'
+                  : review.edgeCasesDelta ? ' (analyzing...)' : ''}
             </span>
           </button>
           {showEdgeCases && review.edgeCases.length > 0 && (
             <EdgeCaseAnalysis edgeCases={review.edgeCases} />
+          )}
+          {showEdgeCases && review.progress.edgeCases.status === 'error' && review.progress.edgeCases.error && (
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px' }}>
+              {review.progress.edgeCases.error}
+            </div>
           )}
           {showEdgeCases && !review.edgeCases.length && review.edgeCasesDelta && (
             <div style={{ fontSize: '13px', marginTop: '8px', whiteSpace: 'pre-wrap' }}>
@@ -308,6 +315,8 @@ function buildStyles(t: OttoTheme) {
     } as React.CSSProperties,
 
     secondaryButton: {
+      display: 'inline-flex',
+      alignItems: 'center',
       padding: '5px 14px',
       borderRadius: '6px',
       background: t.btnSecondaryBg,

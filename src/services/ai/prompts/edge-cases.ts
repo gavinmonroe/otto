@@ -36,7 +36,8 @@ Guidelines:
   - critical: data loss, security vulnerability, crash in production
   - moderate: incorrect behavior, degraded UX, silent failure
   - minor: cosmetic issue, unlikely scenario, minor inconsistency
-- Limit to 3-8 most impactful edge cases. Don't list trivial ones.
+- Limit to 3-5 most impactful edge cases. Quality over quantity — skip trivial ones.
+- Keep hypothetical stack traces SHORT (3-5 lines max). Just show the key frames, not a full trace.
 - If the changes are straightforward with no significant edge cases, return an empty array.
 - Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
 
