@@ -64,6 +64,7 @@ export function useReview() {
     status: store.status,
     error: store.error,
     progress: store.progress,
+    progressMessage: store.progressMessage,
     summary: store.summary,
     summaryDelta: store.summaryDelta,
     fileReviews: store.fileReviews,

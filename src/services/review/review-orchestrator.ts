@@ -35,25 +35,30 @@ export async function executeReview(
   const taskPromises: Promise<void>[] = [];
 
   if (tasks.includes('summary')) {
+    send({ type: 'STREAM_PROGRESS', payload: { message: 'Generating MR summary...' } });
     taskPromises.push(runSummaryTask(context, settings, send));
   }
 
   // Pre-fetch context in parallel with summary
-  const contextReady = prepareContext(context, tasks, host);
+  send({ type: 'STREAM_PROGRESS', payload: { message: 'Fetching file context from repository...' } });
+  const contextReady = prepareContext(context, tasks, host, send);
 
   // Wait for context, then launch remaining tasks
   const remainingTasks = contextReady.then(async ({ fileContents, fileTreePaths, enrichedContext }) => {
     const remaining: Promise<void>[] = [];
 
     if (tasks.includes('codeReview')) {
+      send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${context.diffFiles.length} changed files...` } });
       remaining.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, host, send));
     }
 
     if (tasks.includes('edgeCases')) {
+      send({ type: 'STREAM_PROGRESS', payload: { message: 'Analyzing edge cases...' } });
       remaining.push(runEdgeCasesTask(context, settings, fileContents, send));
     }
 
     if (tasks.includes('relatedFiles')) {
+      send({ type: 'STREAM_PROGRESS', payload: { message: 'Discovering related files...' } });
       remaining.push(
         runRelatedFilesTask(context, settings, fileContents, fileTreePaths, host, send),
       );
@@ -83,6 +88,7 @@ async function prepareContext(
   context: MrContext,
   tasks: ReviewTask[],
   host: GitLabHost | null,
+  send: SendChunk,
 ): Promise<PreparedContext> {
   const fileContents = new Map<string, string>();
   let fileTreePaths: string[] = [];
@@ -99,6 +105,7 @@ async function prepareContext(
 
   if (contentTasks.length > 0) {
     try {
+      send({ type: 'STREAM_PROGRESS', payload: { message: `Fetching ${contentTasks.length} file(s) from target branch...` } });
       const contents = await repoService.fetchMultipleFiles(
         host,
         context.projectId,
@@ -127,6 +134,7 @@ async function prepareContext(
 
       // Build enriched context: reverse imports, callers, exported symbols
       try {
+        send({ type: 'STREAM_PROGRESS', payload: { message: 'Building enriched context (imports, callers, exports)...' } });
         enrichedContext = await buildEnrichedContext(
           host,
           context.projectId,
@@ -189,6 +197,9 @@ async function runCodeReviewTask(
     const batch = files.slice(i, i + concurrency);
     const batchPromises = batch.map(async (file) => {
       try {
+        const fileName = file.filePath.split('/').pop() || file.filePath;
+        send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${fileName}...` } });
+
         // Build repo context string for this file
         let repoContext: string | null = null;
         let callerSnippets: Array<{ filePath: string; snippet: string }> | null = null;

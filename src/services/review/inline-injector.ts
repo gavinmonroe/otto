@@ -148,56 +148,70 @@ function findDiffFileElement(filePath: string): Element | null {
 /**
  * Find the diff row for a specific line number (new file side).
  *
- * GitLab uses two diff view modes:
- * - Inline (unified): `.diff-grid-row` with line number cells
- * - Parallel: two sides, we target the right (new) side
- *
- * Line number cells have a `data-linenumber` attribute.
+ * GitLab uses different DOM structures across versions:
+ * - CSS grid: `.diff-grid-row` with `.diff-td.diff-line-num`
+ * - Table: `<tr>` with `<td>` line number cells
+ * - data-linenumber attribute (modern GitLab)
+ * - Line number links with text content (older GitLab)
+ * - ID-based line references
  */
 function findLineRow(fileElement: Element, lineNumber: number): Element | null {
-  // Strategy 1: Find by data-linenumber on the new-file side
-  // In inline view, new line numbers are in cells with id pattern like "LC_<n>"
-  // or have data-linenumber attribute
+  // Strategy 1: data-linenumber attribute (most reliable in modern GitLab)
   const lineNumCells = fileElement.querySelectorAll(
-    `.diff-td.diff-line-num[data-linenumber="${lineNumber}"]`,
+    `[data-linenumber="${lineNumber}"]`,
   );
 
   for (const cell of lineNumCells) {
-    // In inline view, we want the "new" line number (not the "old" one)
-    // The new-side cell is typically the second line-num cell in the row,
-    // or has a specific class. Check if it's on the new side.
-    const row = cell.closest('.diff-grid-row, .diff-tr, .line_holder');
+    const row = cell.closest('.diff-grid-row, .diff-tr, .line_holder, tr');
     if (row) {
-      // Verify this is a new-file line number (not old-file)
-      // In inline view: new line nums are in the second .diff-line-num cell
-      // In parallel view: new line nums are in .diff-grid-right
-      const isNewSide = cell.closest('.diff-grid-right, .right-side') !== null;
-      const isInlineNew = !cell.closest('.diff-grid-right, .diff-grid-left');
-
-      if (isNewSide || isInlineNew) {
-        return row;
-      }
+      // In parallel view, prefer the new-file side
+      const isOldSideOnly = cell.closest('.diff-grid-left, .left-side') !== null
+        && cell.closest('.diff-grid-right, .right-side') === null;
+      if (!isOldSideOnly) return row;
     }
   }
+  // If we only found old-side matches, still use the first one
+  if (lineNumCells.length > 0) {
+    const row = lineNumCells[0].closest('.diff-grid-row, .diff-tr, .line_holder, tr');
+    if (row) return row;
+  }
 
-  // Strategy 2: Fallback — search by line number link text
-  // GitLab sometimes uses <a> tags with the line number as text
-  const links = fileElement.querySelectorAll('.diff-td.diff-line-num a');
-  for (const link of links) {
+  // Strategy 2: Line number links — <a> tags with line number as text
+  const allLinks = fileElement.querySelectorAll('.diff-line-num a, td.diff-line-num a, .line-numbers a');
+  for (const link of allLinks) {
     if (link.textContent?.trim() === String(lineNumber)) {
-      const row = link.closest('.diff-grid-row, .diff-tr, .line_holder');
+      const row = link.closest('.diff-grid-row, .diff-tr, .line_holder, tr');
       if (row) return row;
     }
   }
 
-  // Strategy 3: Last resort — find by id pattern
-  // GitLab generates line IDs like "<file_hash>_<old>_<new>"
+  // Strategy 3: Line number cells by text content (no <a> wrapper)
+  const allLineNumCells = fileElement.querySelectorAll('.diff-line-num, td.line_content');
+  for (const cell of allLineNumCells) {
+    // Check direct text content of the cell
+    const text = cell.textContent?.trim();
+    if (text === String(lineNumber)) {
+      const row = cell.closest('.diff-grid-row, .diff-tr, .line_holder, tr');
+      if (row) return row;
+    }
+  }
+
+  // Strategy 4: ID-based — GitLab generates IDs like "<file_hash>_<old>_<new>"
   const fileHash = fileElement.id;
   if (fileHash) {
-    // Try common ID patterns
-    const row = fileElement.querySelector(`#${CSS.escape(fileHash)}_${lineNumber}_${lineNumber}`)
-      ?.closest('.diff-grid-row, .diff-tr, .line_holder');
-    if (row) return row;
+    // Try multiple ID patterns
+    const patterns = [
+      `${fileHash}_${lineNumber}_${lineNumber}`,
+      `${fileHash}_${lineNumber}`,
+      `LC_${lineNumber}`,
+    ];
+    for (const pattern of patterns) {
+      const el = fileElement.querySelector(`[id="${CSS.escape(pattern)}"]`);
+      if (el) {
+        const row = el.closest('.diff-grid-row, .diff-tr, .line_holder, tr');
+        if (row) return row;
+      }
+    }
   }
 
   return null;

@@ -47,6 +47,9 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
     case 'STREAM_EDGE_CASES_COMPLETE':
       s.setEdgeCases(chunk.payload.edgeCases);
       break;
+    case 'STREAM_PROGRESS':
+      s.setProgressMessage(chunk.payload.message);
+      break;
     case 'STREAM_TASK_ERROR': {
       const task = chunk.payload.task;
       if (!task.startsWith('codeReview:')) {

@@ -38,6 +38,9 @@ type ReviewState = {
   status: ReviewStatus;
   error: string | null;
 
+  // Progress message (e.g., "Fetching file context...", "Reviewing src/foo.ts...")
+  progressMessage: string | null;
+
   // Per-task progress
   progress: ReviewProgress;
 
@@ -67,6 +70,7 @@ type ReviewActions = {
   startReview: (tasks: ReviewTask[]) => void;
   completeReview: () => void;
   setError: (error: string) => void;
+  setProgressMessage: (message: string | null) => void;
 
   // Summary
   appendSummaryDelta: (content: string) => void;
@@ -95,6 +99,7 @@ const INITIAL_STATE: ReviewState = {
   mrContext: null,
   status: 'idle',
   error: null,
+  progressMessage: null,
   progress: INITIAL_REVIEW_PROGRESS,
   summary: null,
   summaryDelta: '',
@@ -169,6 +174,8 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
   }),
 
   setError: (error) => set({ status: 'error', error }),
+
+  setProgressMessage: (message) => set({ progressMessage: message }),
 
   // Summary streaming
   appendSummaryDelta: (content) => set((state) => ({
@@ -253,13 +260,21 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
     },
   })),
 
-  // Task progress
-  setTaskStatus: (task, status, error) => set((state) => ({
-    progress: {
-      ...state.progress,
-      [task]: { ...state.progress[task], status, error: error || null },
-    },
-  })),
+  // Task progress — also clears delta for the failed task
+  setTaskStatus: (task, status, error) => set((state) => {
+    const updates: Partial<ReviewState> = {
+      progress: {
+        ...state.progress,
+        [task]: { ...state.progress[task], status, error: error || null },
+      },
+    };
+    // Clear streaming deltas on error so raw JSON doesn't linger
+    if (status === 'error') {
+      if (task === 'edgeCases') updates.edgeCasesDelta = '';
+      if (task === 'summary') updates.summaryDelta = '';
+    }
+    return updates;
+  }),
 
   // Comment actions
   updateCommentStatus: (commentId, status, editedBody) => set((state) => ({

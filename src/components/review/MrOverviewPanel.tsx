@@ -132,16 +132,30 @@ export function MrOverviewPanel() {
 
       {/* Progress bar */}
       {isActive && (
-        <div style={s.progressBar}>
-          <ProgressItem label="Summary" status={review.progress.summary.status} theme={theme} />
-          <ProgressItem
-            label={`Files (${review.progress.codeReview.filesComplete}/${review.progress.codeReview.filesTotal})`}
-            status={review.progress.codeReview.status}
-            theme={theme}
-          />
-          <ProgressItem label="Edge Cases" status={review.progress.edgeCases.status} theme={theme} />
-          <ProgressItem label="Related" status={review.progress.relatedFiles.status} theme={theme} />
-        </div>
+        <>
+          <div style={s.progressBar}>
+            <ProgressItem label="Summary" status={review.progress.summary.status} theme={theme} />
+            <ProgressItem
+              label={`Files (${review.progress.codeReview.filesComplete}/${review.progress.codeReview.filesTotal})`}
+              status={review.progress.codeReview.status}
+              theme={theme}
+            />
+            <ProgressItem label="Edge Cases" status={review.progress.edgeCases.status} theme={theme} />
+            <ProgressItem label="Related" status={review.progress.relatedFiles.status} theme={theme} />
+          </div>
+          {review.progressMessage && (
+            <div style={{
+              padding: '4px 14px',
+              fontSize: '11px',
+              color: theme.textMuted,
+              background: theme.bgSubtle,
+              borderBottom: `1px solid ${theme.borderSubtle}`,
+              fontStyle: 'italic',
+            }}>
+              {review.progressMessage}
+            </div>
+          )}
+        </>
       )}
 
       {/* Summary */}
