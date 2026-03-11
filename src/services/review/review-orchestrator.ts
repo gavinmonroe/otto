@@ -14,6 +14,7 @@ import type { TicketInfo } from '@/types/ticket';
 import * as aiService from '../ai/ai-service';
 import * as gitlab from '../gitlab/gitlab-client';
 import * as repoService from '../gitlab/repo-service';
+import { createExplorerContext } from '../gitlab/repo-explorer';
 import { buildEnrichedContext, formatFileContext } from '../gitlab/context-enrichment';
 import type { EnrichedContext } from '../gitlab/context-enrichment';
 import { extractTicketRefs, findProviderForKey } from '../ticket/ticket-parser';
@@ -483,6 +484,11 @@ async function runRelatedFilesTask(
   send: SendChunk,
 ): Promise<void> {
   try {
+    if (!host || !context.projectId) {
+      send({ type: 'STREAM_TASK_ERROR', payload: { task: 'relatedFiles', error: 'GitLab host required for related files discovery' } });
+      return;
+    }
+
     const imports: Record<string, string[]> = {};
     for (const file of context.diffFiles) {
       const content = fileContents.get(file.filePath);
@@ -491,48 +497,41 @@ async function runRelatedFilesTask(
       }
     }
 
-    const result = await aiService.discoverRelatedFiles(settings.ai, {
-      diffFiles: context.diffFiles,
-      imports,
-      fileTree: fileTreePaths,
-      mrTitle: context.title,
-    });
+    // Create a repo explorer context for the AI to use tools
+    const explorerCtx = createExplorerContext(
+      host,
+      context.projectId,
+      context.sourceBranch,
+    );
+
+    send({ type: 'STREAM_PROGRESS', payload: { message: 'AI is exploring the repository to find related files...' } });
+
+    const result = await aiService.discoverRelatedFiles(
+      settings.ai,
+      {
+        diffFiles: context.diffFiles,
+        imports,
+        mrTitle: context.title,
+      },
+      explorerCtx,
+    );
 
     if (!result.ok) {
       send({ type: 'STREAM_TASK_ERROR', payload: { task: 'relatedFiles', error: result.error } });
       return;
     }
 
-    // Normalize AI-returned file paths:
-    // 1. Strip project/repo name prefix the AI sometimes prepends
-    // 2. Validate against the file tree when available
-    const treeSet = new Set(fileTreePaths);
+    // Filter out changed files and clean up paths
     const changedPaths = new Set(context.diffFiles.map((f) => f.filePath));
-    const projectSegments = context.projectPath.split('/');
+    const validated = result.data.filter((f) => {
+      const fp = f.filePath.replace(/^\/+/, '').trim();
+      return fp && !changedPaths.has(fp);
+    });
 
-    const normalized = result.data.map((raw) => {
-      let fp = raw.filePath.replace(/^\/+/, '').trim();
-
-      // AI sometimes prepends "repoName/..." or "group/repo/..." to paths.
-      // Try stripping project path segments from the front.
-      for (let i = projectSegments.length - 1; i >= 0; i--) {
-        const prefix = projectSegments.slice(i).join('/') + '/';
-        if (fp.startsWith(prefix)) {
-          const stripped = fp.slice(prefix.length);
-          // If we have a tree, validate. Otherwise just strip it.
-          if (treeSet.size === 0 || treeSet.has(stripped)) {
-            fp = stripped;
-            break;
-          }
-        }
-      }
-
-      return { ...raw, filePath: fp };
-    }).filter((f) => !changedPaths.has(f.filePath));
-
+    // Fetch content for the validated files
     const relatedFiles: RelatedFile[] = [];
-    if (host && context.projectId && normalized.length > 0) {
-      const filePaths = normalized.map((f) => f.filePath);
+    if (validated.length > 0) {
+      const filePaths = validated.map((f) => f.filePath);
       const contents = await repoService.fetchMultipleFiles(
         host,
         context.projectId,
@@ -540,20 +539,11 @@ async function runRelatedFilesTask(
         context.sourceBranch,
       );
 
-      for (const rawFile of normalized) {
+      for (const rawFile of validated) {
         relatedFiles.push({
           filePath: rawFile.filePath,
           reason: rawFile.reason,
           content: contents.get(rawFile.filePath) || null,
-          relationship: rawFile.relationship,
-        });
-      }
-    } else {
-      for (const rawFile of normalized) {
-        relatedFiles.push({
-          filePath: rawFile.filePath,
-          reason: rawFile.reason,
-          content: null,
           relationship: rawFile.relationship,
         });
       }

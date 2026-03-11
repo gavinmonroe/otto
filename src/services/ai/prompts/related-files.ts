@@ -1,10 +1,9 @@
 // ---------------------------------------------------------------------------
-// Prompt: Related Files Discovery
+// Prompt: Related Files Discovery (Tool-Use Flow)
 //
 // Identifies files NOT in the diff that are relevant to the review.
-// The AI receives the list of changed files, their import relationships,
-// and the project file tree, then reasons about which other files a
-// reviewer should look at.
+// Instead of receiving a static file tree, the AI uses tools to explore
+// the repository structure and find real file paths.
 //
 // Output format: JSON array of related file objects.
 // ---------------------------------------------------------------------------
@@ -17,29 +16,38 @@ const SYSTEM_PROMPT = `${OTTO_IDENTITY}
 
 Your task: identify files NOT in the merge request diff that a reviewer should examine for a thorough review.
 
-You will receive the list of changed files with diffs, import/dependency relationships, and the project file tree.
+You have tools to explore the repository:
+- **list_directory**: List files and subdirectories at a path. Start with "" for root.
+- **get_subtree**: Get all files under a directory recursively (up to 500).
+- **search_files**: Search for files by name pattern across the entire repo.
 
-Respond with a JSON array matching this schema:
+## Workflow
+1. Look at the changed files and their import relationships.
+2. Use the tools to explore the repository and find related files. Start by listing the directories that contain changed files, then search for imported modules, test files, shared types, etc.
+3. Once you have found the relevant files, respond with your final answer.
+
+## Final Answer Format
+When you are done exploring, respond with ONLY a JSON array (no tool calls):
 [
   {
-    "filePath": "string — full path from project root",
-    "reason": "string — 1-2 sentences: why this file is relevant and what to look for in it",
+    "filePath": "string — exact full path as returned by the tools",
+    "reason": "string — 1-2 sentences: why this file is relevant",
     "relationship": "imports" | "imported-by" | "shared-type" | "test" | "config" | "other"
   }
 ]
 
-Guidelines:
-- Focus on files AFFECTED by the changes or that provide CONTEXT for understanding them.
-- Prioritize: importers of changed modules, test files, shared types/interfaces, configs that might need updating.
-- Don't include files already in the diff. 5-10 most relevant files max. Empty array if none are worth examining.
-- Respond ONLY with valid JSON. No markdown fences, no explanation outside the JSON.`;
+## Rules
+- ONLY use file paths you have seen returned by the tools. Never guess or invent paths.
+- Don't include files already in the diff.
+- Return 5-10 most relevant files max. Empty array [] if none are worth examining.
+- Focus on: importers of changed modules, test files, shared types/interfaces, configs.
+- Your final response must be ONLY valid JSON. No markdown fences, no explanation.`;
 
 export const DEFAULT_RELATED_FILES_PROMPT = SYSTEM_PROMPT;
 
 export type RelatedFilesInput = {
   diffFiles: DiffFileData[];
   imports: Record<string, string[]>;  // filePath → imported paths
-  fileTree: string[];                  // All file paths in the project
   mrTitle: string;
 };
 
@@ -53,23 +61,6 @@ export function buildRelatedFilesPrompt(input: RelatedFilesInput, customSystemPr
     .map(([file, imports]) => `${file}:\n${imports.map((i) => `  → ${i}`).join('\n')}`)
     .join('\n\n');
 
-  // Truncate file tree if too large (keep it under ~4000 chars)
-  let fileTreeStr = input.fileTree.join('\n');
-  if (fileTreeStr.length > 4000) {
-    // Keep files that share directories with changed files
-    const changedDirs = new Set(
-      input.diffFiles.map((f) => f.filePath.split('/').slice(0, -1).join('/')),
-    );
-    const relevantFiles = input.fileTree.filter((f) => {
-      const dir = f.split('/').slice(0, -1).join('/');
-      return changedDirs.has(dir) || changedDirs.has(dir.split('/').slice(0, -1).join('/'));
-    });
-    fileTreeStr = relevantFiles.join('\n');
-    if (fileTreeStr.length > 4000) {
-      fileTreeStr = fileTreeStr.slice(0, 4000) + '\n... (truncated)';
-    }
-  }
-
   const userContent = `# MR: ${input.mrTitle}
 
 ## Changed Files
@@ -78,8 +69,7 @@ ${changedFiles}
 ## Import Relationships
 ${importMap || '(No imports detected)'}
 
-## Project File Tree
-${fileTreeStr}`;
+Use the tools to explore the repository and find files related to these changes. Start by listing the directories that contain the changed files.`;
 
   return [
     { role: 'system', content: customSystemPrompt || SYSTEM_PROMPT },

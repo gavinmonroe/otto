@@ -27,7 +27,7 @@ import type {
 } from '@/types/review';
 import type { Result } from '@/types/messages';
 import { chatCompletion, chatCompletionStream } from './ai-client';
-import type { AiClientConfig } from './ai-client';
+import type { AiClientConfig, ChatMessage, ToolDefinition } from './ai-client';
 import { buildSummaryPrompt } from './prompts/summary';
 import { buildCodeReviewPrompt } from './prompts/code-review';
 import type { CodeReviewInput } from './prompts/code-review';
@@ -42,6 +42,11 @@ import { buildChatPrompt } from './prompts/chat';
 import type { ChatReviewContext } from '@/types/messages';
 import type { ChatMessage as UiChatMessage, SuggestedQuestion } from '@/types/chat';
 import { generateId } from '@/lib/utils';
+import {
+  REPO_EXPLORER_TOOLS,
+  executeToolCall,
+  type RepoExplorerContext,
+} from '@/services/gitlab/repo-explorer';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -410,7 +415,7 @@ export async function generateEdgeCases(
 }
 
 // ---------------------------------------------------------------------------
-// Related Files Discovery
+// Related Files Discovery (Tool-Use Flow)
 // ---------------------------------------------------------------------------
 
 type RawRelatedFile = {
@@ -419,24 +424,93 @@ type RawRelatedFile = {
   relationship: 'imports' | 'imported-by' | 'shared-type' | 'test' | 'config' | 'other';
 };
 
+/** Max tool-use round-trips before forcing a final answer. */
+const MAX_TOOL_ITERATIONS = 8;
+
 /**
- * Discover related files not in the diff.
- * This is non-streaming because the output is structured and typically small.
+ * Discover related files using AI-driven repo exploration.
+ * The AI uses tools (list_directory, get_subtree, search_files) to navigate
+ * the repository and find real file paths, then returns its recommendations.
  */
 export async function discoverRelatedFiles(
   aiConfig: AiConfig,
   input: RelatedFilesInput,
+  explorerCtx: RepoExplorerContext,
 ): Promise<Result<RawRelatedFile[]>> {
-  const messages = buildRelatedFilesPrompt(input, getCustomPrompt(aiConfig, 'relatedFiles'));
+  const messages: ChatMessage[] = buildRelatedFilesPrompt(input, getCustomPrompt(aiConfig, 'relatedFiles'));
   const config = getClientConfig(aiConfig);
   const model = getModel(aiConfig, 'relatedFiles');
   const temperature = getTemperature(aiConfig, 'relatedFiles');
   const max_tokens = getMaxTokens(aiConfig, 'relatedFiles');
+  const tools: ToolDefinition[] = REPO_EXPLORER_TOOLS;
 
-  const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
-  if (!result.ok) return result;
+  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    const result = await chatCompletion(config, {
+      model,
+      messages,
+      temperature,
+      max_tokens,
+      tools,
+      tool_choice: 'auto',
+    });
 
-  const content = result.data.choices[0]?.message?.content || '';
+    if (!result.ok) return result;
+
+    const choice = result.data.choices[0];
+    if (!choice) {
+      return { ok: false, error: 'No response from AI' };
+    }
+
+    const toolCalls = choice.message.tool_calls;
+
+    // No tool calls — the AI is giving its final answer
+    if (!toolCalls || toolCalls.length === 0) {
+      const content = choice.message.content || '';
+      return parseAiJson<RawRelatedFile[]>(content, 'related files');
+    }
+
+    // Add the assistant message with tool calls to the conversation
+    messages.push({
+      role: 'assistant',
+      content: choice.message.content ?? null,
+      tool_calls: toolCalls,
+    });
+
+    // Execute each tool call and add results to the conversation
+    for (const toolCall of toolCalls) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(toolCall.function.arguments);
+      } catch {
+        // Malformed args — return empty result
+      }
+
+      const toolResult = await executeToolCall(explorerCtx, toolCall.function.name, args);
+
+      messages.push({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: toolResult,
+      });
+    }
+  }
+
+  // Hit max iterations — ask for final answer without tools
+  messages.push({
+    role: 'user',
+    content: 'Please provide your final answer now as a JSON array. No more tool calls.',
+  });
+
+  const finalResult = await chatCompletion(config, {
+    model,
+    messages,
+    temperature,
+    max_tokens,
+  });
+
+  if (!finalResult.ok) return finalResult;
+
+  const content = finalResult.data.choices[0]?.message?.content || '';
   return parseAiJson<RawRelatedFile[]>(content, 'related files');
 }
 
