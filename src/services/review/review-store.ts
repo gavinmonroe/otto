@@ -26,6 +26,7 @@ import type {
   EdgeCase,
   ReviewStatus,
 } from '@/types/review';
+import type { FollowUpAnalysis, FollowUpStatus } from '@/types/followup';
 import type { ReviewProgress, ReviewTask } from './review-types';
 import { INITIAL_REVIEW_PROGRESS } from './review-types';
 import type { CachedReview } from './review-cache';
@@ -56,6 +57,11 @@ type ReviewState = {
   // Timestamps
   startedAt: number | null;
   completedAt: number | null;
+
+  // Follow-up state — keyed by commentId
+  followUps: Record<string, FollowUpAnalysis>;
+  followUpStatus: Record<string, FollowUpStatus>;
+  followUpErrors: Record<string, string>;
 };
 
 type ReviewActions = {
@@ -93,6 +99,12 @@ type ReviewActions = {
 
   // Comment actions (user interactions)
   updateCommentStatus: (commentId: string, status: ReviewCommentStatus, editedBody?: string) => void;
+
+  // Follow-up actions
+  setFollowUp: (commentId: string, analysis: FollowUpAnalysis) => void;
+  setFollowUpStatus: (commentId: string, status: FollowUpStatus, error?: string) => void;
+  clearFollowUp: (commentId: string) => void;
+  clearAllFollowUps: () => void;
 };
 
 const INITIAL_STATE: ReviewState = {
@@ -110,6 +122,9 @@ const INITIAL_STATE: ReviewState = {
   edgeCasesDelta: '',
   startedAt: null,
   completedAt: null,
+  followUps: {},
+  followUpStatus: {},
+  followUpErrors: {},
 };
 
 export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) => ({
@@ -287,4 +302,34 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
       ),
     })),
   })),
+
+  // Follow-up actions
+  setFollowUp: (commentId, analysis) => set((state) => ({
+    followUps: { ...state.followUps, [commentId]: analysis },
+    followUpStatus: { ...state.followUpStatus, [commentId]: 'complete' as const },
+  })),
+
+  setFollowUpStatus: (commentId, status, error) => set((state) => ({
+    followUpStatus: { ...state.followUpStatus, [commentId]: status },
+    followUpErrors: error
+      ? { ...state.followUpErrors, [commentId]: error }
+      : state.followUpErrors,
+  })),
+
+  clearFollowUp: (commentId) => set((state) => {
+    const { [commentId]: _fu, ...remainingFollowUps } = state.followUps;
+    const { [commentId]: _st, ...remainingStatus } = state.followUpStatus;
+    const { [commentId]: _er, ...remainingErrors } = state.followUpErrors;
+    return {
+      followUps: remainingFollowUps,
+      followUpStatus: remainingStatus,
+      followUpErrors: remainingErrors,
+    };
+  }),
+
+  clearAllFollowUps: () => set({
+    followUps: {},
+    followUpStatus: {},
+    followUpErrors: {},
+  }),
 }));

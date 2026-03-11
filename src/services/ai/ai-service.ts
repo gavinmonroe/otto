@@ -35,6 +35,9 @@ import { buildEdgeCasePrompt } from './prompts/edge-cases';
 import type { EdgeCaseInput } from './prompts/edge-cases';
 import { buildRelatedFilesPrompt } from './prompts/related-files';
 import type { RelatedFilesInput } from './prompts/related-files';
+import { buildFollowUpPrompt } from './prompts/followup';
+import type { FollowUpInput } from './prompts/followup';
+import type { FollowUpAnalysis, FollowUpAction } from '@/types/followup';
 import { generateId } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
@@ -312,4 +315,50 @@ export async function discoverRelatedFiles(
 
   const content = result.data.choices[0]?.message?.content || '';
   return parseAiJson<RawRelatedFile[]>(content, 'related files');
+}
+
+// ---------------------------------------------------------------------------
+// Comment Follow-Up Analysis
+// ---------------------------------------------------------------------------
+
+/**
+ * Raw AI output shape before we attach the commentId.
+ */
+type RawFollowUpAnalysis = {
+  intent: FollowUpAnalysis['intent'];
+  perspective: string;
+  interpretation: string;
+  recommendedAction: FollowUpAction;
+};
+
+/**
+ * Analyze a comment thread and produce a follow-up recommendation.
+ * Non-streaming — follow-up responses are small and fast.
+ */
+export async function generateFollowUp(
+  aiConfig: AiConfig,
+  input: FollowUpInput,
+  commentId: string,
+): Promise<Result<FollowUpAnalysis>> {
+  const messages = buildFollowUpPrompt(input);
+  const config = getClientConfig(aiConfig);
+  const model = getModel(aiConfig, 'followUp');
+  const temperature = getTemperature(aiConfig, 'followUp');
+
+  const result = await chatCompletion(config, { model, messages, temperature });
+  if (!result.ok) return result;
+
+  const content = result.data.choices[0]?.message?.content || '';
+  const parsed = parseAiJson<RawFollowUpAnalysis>(content, 'comment follow-up');
+  if (!parsed.ok) return parsed;
+
+  const analysis: FollowUpAnalysis = {
+    commentId,
+    intent: parsed.data.intent,
+    perspective: parsed.data.perspective,
+    interpretation: parsed.data.interpretation,
+    recommendedAction: parsed.data.recommendedAction,
+  };
+
+  return { ok: true, data: analysis };
 }

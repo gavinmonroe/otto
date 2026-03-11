@@ -20,6 +20,7 @@ import type {
   GitLabDiffFile,
   GitLabTreeItem,
   GitLabBlameRange,
+  GitLabDiscussion,
 } from '@/types/gitlab';
 import { encodeProjectPath, normalizeUrl } from '@/lib/utils';
 
@@ -287,4 +288,24 @@ export async function testConnection(
   const result = await gitlabFetch<{ username: string }>(host, '/user');
   if (!result.ok) return result;
   return { ok: true, data: { username: result.data.username } };
+}
+
+// ---------------------------------------------------------------------------
+// MR Discussions — used by the comment follow-up feature.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch all discussions (threaded comments) on a merge request.
+ * Each discussion contains one or more notes. Inline diff comments
+ * include position data (file path, line numbers).
+ */
+export async function fetchMrDiscussions(
+  host: GitLabHostConfig,
+  projectId: number,
+  mrIid: number,
+): Promise<Result<GitLabDiscussion[]>> {
+  return gitlabFetchAll<GitLabDiscussion>(
+    host,
+    `/projects/${projectId}/merge_requests/${mrIid}/discussions`,
+  );
 }

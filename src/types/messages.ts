@@ -27,7 +27,9 @@ import type {
   GitLabMergeRequest,
   GitLabProject,
   GitLabTreeItem,
+  GitLabDiscussion,
 } from './gitlab';
+import type { FollowUpAnalysis, ThreadContext } from './followup';
 
 // ---------------------------------------------------------------------------
 // Result type — used for all responses that can fail.
@@ -108,6 +110,26 @@ export type HighlightLinesMessage = {
   payload: { lines: string[]; lang: string | null; isDark: boolean };
 };
 
+export type AnalyzeCommentMessage = {
+  type: 'ANALYZE_COMMENT';
+  payload: {
+    hostId: string | null;       // null if no GitLab host configured
+    projectId: number | null;
+    mrIid: number;
+    projectPath: string;
+    sourceBranch: string;
+    mrTitle: string;
+    mrDescription: string | null;
+    thread: ThreadContext;
+    threadHash: string;          // For cache validation
+  };
+};
+
+export type FetchMrDiscussionsMessage = {
+  type: 'FETCH_MR_DISCUSSIONS';
+  payload: { hostId: string; projectId: number; mrIid: number };
+};
+
 export type RequestMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
@@ -122,7 +144,9 @@ export type RequestMessage =
   | TestGitLabConnectionMessage
   | OpenOptionsMessage
   | HighlightCodeMessage
-  | HighlightLinesMessage;
+  | HighlightLinesMessage
+  | AnalyzeCommentMessage
+  | FetchMrDiscussionsMessage;
 
 // ---------------------------------------------------------------------------
 // Response map — maps each request type to its response type.
@@ -143,6 +167,8 @@ export type MessageResponseMap = {
   OPEN_OPTIONS: Result<void>;
   HIGHLIGHT_CODE: Result<string>;
   HIGHLIGHT_LINES: Result<string[]>;
+  ANALYZE_COMMENT: Result<FollowUpAnalysis>;
+  FETCH_MR_DISCUSSIONS: Result<GitLabDiscussion[]>;
 };
 
 // ---------------------------------------------------------------------------

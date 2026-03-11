@@ -19,6 +19,7 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   codeReview: 'Code Review',
   edgeCases: 'Edge Cases',
   relatedFiles: 'Related Files',
+  followUp: 'Comment Follow-Up',
 };
 
 export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {

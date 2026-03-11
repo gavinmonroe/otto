@@ -21,6 +21,8 @@ import { loadSettings, saveSettings } from '@/lib/storage';
 import * as gitlab from '@/services/gitlab/gitlab-client';
 import * as aiClient from '@/services/ai/ai-client';
 import { executeReview } from '@/services/review/review-orchestrator';
+import { generateFollowUp } from '@/services/ai/ai-service';
+import { loadCachedFollowUp, saveCachedFollowUp } from '@/services/followup/followup-cache';
 import { highlight, highlightLines } from '@/services/syntax/highlighter';
 import { normalizeUrl } from '@/lib/utils';
 
@@ -138,6 +140,94 @@ export default defineBackground(() => {
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : 'Highlight lines failed' };
       }
+    },
+
+    FETCH_MR_DISCUSSIONS: async (payload) => {
+      const settings = await loadSettings();
+      const host = settings.gitlab.hosts.find((h) => h.id === payload.hostId);
+      if (!host) return { ok: false, error: 'GitLab host not found in settings' };
+      return gitlab.fetchMrDiscussions(host, payload.projectId, payload.mrIid);
+    },
+
+    ANALYZE_COMMENT: async (payload) => {
+      const settings = await loadSettings();
+
+      if (!settings.ai.baseUrl) {
+        return { ok: false, error: 'AI provider not configured. Open Otto settings to set up your AI endpoint.' };
+      }
+
+      const { thread, threadHash, projectPath, mrIid } = payload;
+      const commentId = thread.notes[thread.notes.length - 1]?.id || thread.discussionId;
+
+      // Check cache first
+      const cached = await loadCachedFollowUp(projectPath, mrIid, commentId, threadHash);
+      if (cached) {
+        return { ok: true, data: cached.analysis };
+      }
+
+      // Fetch full file content if this is an inline comment and we have a GitLab host
+      let fileContent: string | null = null;
+      let mrDiffSnippet: string | null = thread.diffSnippet;
+
+      if (thread.filePath && payload.hostId && payload.projectId) {
+        const host = settings.gitlab.hosts.find((h) => h.id === payload.hostId);
+        if (host) {
+          const fileResult = await gitlab.fetchFileContent(
+            host,
+            payload.projectId,
+            thread.filePath,
+            payload.sourceBranch,
+          );
+          if (fileResult.ok) {
+            fileContent = fileResult.data;
+          }
+
+          // If we don't have a diff snippet from the DOM, try to get it from the API
+          if (!mrDiffSnippet) {
+            const changesResult = await gitlab.fetchMergeRequestChanges(
+              host,
+              payload.projectId,
+              mrIid,
+            );
+            if (changesResult.ok) {
+              const fileChange = changesResult.data.changes.find(
+                (c) => c.new_path === thread.filePath || c.old_path === thread.filePath,
+              );
+              if (fileChange) {
+                mrDiffSnippet = fileChange.diff;
+              }
+            }
+          }
+        }
+      }
+
+      // Call AI
+      const result = await generateFollowUp(
+        settings.ai,
+        {
+          thread,
+          fileContent,
+          mrTitle: payload.mrTitle,
+          mrDescription: payload.mrDescription,
+          mrDiffSnippet,
+        },
+        commentId,
+      );
+
+      if (!result.ok) return result;
+
+      // Save to cache
+      await saveCachedFollowUp({
+        version: 1,
+        projectPath,
+        mrIid,
+        commentId,
+        threadHash,
+        timestamp: Date.now(),
+        analysis: result.data,
+      });
+
+      return result;
     },
   };
 

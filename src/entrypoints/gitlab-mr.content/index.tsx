@@ -1,11 +1,15 @@
 // ---------------------------------------------------------------------------
-// Content Script Entry — GitLab MR Diff Page
+// Content Script Entry — GitLab MR Page
 //
-// Mounts three types of UI into the GitLab page:
-// 1. MrOverviewPanel — above the diff file list (summary, controls)
-// 2. FileReviewCard — button in each diff file's header (trigger review)
-// 3. FileReviewFooter — collapsible sections in each diff file's footer
-//    (review results appear here, inline with the diff)
+// Mounts UI into the GitLab page:
+// 1. FollowUpButton — on every comment's action bar (all tabs)
+// 2. MrOverviewPanel — above the diff file list (diffs tab)
+// 3. FileReviewCard — button in each diff file's header (diffs tab)
+// 4. FileReviewFooter — collapsible sections in each diff file's footer
+// 5. InlineCommentThread — review comments injected into diff rows
+//
+// The follow-up feature starts immediately on any MR page tab.
+// The review/diff features wait for the diffs tab to become active.
 // ---------------------------------------------------------------------------
 
 import './style.css';
@@ -22,6 +26,7 @@ import { ThemeProvider } from '@/components/ThemeContext';
 import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { startInlineCommentInjection } from '@/services/review/inline-injector';
 import { startRelatedFilesSidebar } from '@/services/review/sidebar-injector';
+import { startFollowUpButtonInjection } from '@/services/followup/followup-injector';
 import { createElement } from 'react';
 import type { ReviewTask } from '@/services/review/review-types';
 
@@ -34,38 +39,29 @@ export default defineContentScript({
     const urlInfo = parseMrUrl(window.location.href);
     if (!urlInfo) return;
 
-    const diffsContainer = await waitForDiffsTab(ctx.signal);
-    if (!diffsContainer) return;
-
     const isDarkMode = detectDarkMode();
 
-    const mrContext = await buildMrContext(true);
-    if (!mrContext) return;
+    // Build a lightweight MR context immediately (no API diff fetch).
+    // This gives follow-up buttons the mrContext they need on any tab.
+    const lightContext = await buildMrContext(false);
+    if (lightContext) {
+      useReviewStore.getState().setMrContext(lightContext);
+    }
 
-    useReviewStore.getState().setMrContext(mrContext);
+    // Start follow-up button injection immediately — comments exist on
+    // the overview tab, discussion tab, AND the diffs tab.
+    startFollowUpButtonInjection(isDarkMode, ctx.signal);
 
-    await mountOverviewPanel(ctx, isDarkMode);
-
-    observeDiffFiles((fileElement, filePath) => {
-      mountFileReviewCard(ctx, fileElement, filePath, isDarkMode);
-      mountFileReviewFooter(ctx, fileElement, filePath, isDarkMode);
-    }, ctx.signal);
-
-    // Inject inline comments next to diff lines as reviews complete
-    startInlineCommentInjection(isDarkMode, ctx.signal);
-
-    // Inject related files into GitLab's sidebar file tree
-    startRelatedFilesSidebar(isDarkMode, ctx.signal);
-
-    // Load cached review or auto-review if preference is enabled
-    await loadOrAutoReview(mrContext);
+    // The rest of the review features require the diffs tab.
+    // Run this in parallel so follow-up buttons aren't blocked.
+    initDiffsFeatures(ctx, urlInfo, isDarkMode);
 
     ctx.addEventListener(window, 'wxt:locationchange', async (event) => {
       const newUrlInfo = parseMrUrl(event.newUrl.href);
       if (!newUrlInfo) return;
       if (newUrlInfo.mrIid !== urlInfo.mrIid || newUrlInfo.projectPath !== urlInfo.projectPath) {
         useReviewStore.getState().reset();
-        const newContext = await buildMrContext(true);
+        const newContext = await buildMrContext(false);
         if (newContext) {
           useReviewStore.getState().setMrContext(newContext);
         }
@@ -77,6 +73,42 @@ export default defineContentScript({
 // ---------------------------------------------------------------------------
 // Mount helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Initialize diff-tab-specific features. Waits for the diffs tab to become
+ * active, then mounts review UI. Runs independently of follow-up injection
+ * so buttons appear on comments immediately regardless of which tab is active.
+ */
+async function initDiffsFeatures(
+  ctx: typeof ContentScriptContext.prototype,
+  urlInfo: { hostUrl: string; projectPath: string; mrIid: number },
+  isDarkMode: boolean,
+): Promise<void> {
+  const diffsContainer = await waitForDiffsTab(ctx.signal);
+  if (!diffsContainer) return;
+
+  // Now that diffs are visible, enrich the MR context with full API diffs
+  const mrContext = await buildMrContext(true);
+  if (!mrContext) return;
+
+  useReviewStore.getState().setMrContext(mrContext);
+
+  await mountOverviewPanel(ctx, isDarkMode);
+
+  observeDiffFiles((fileElement, filePath) => {
+    mountFileReviewCard(ctx, fileElement, filePath, isDarkMode);
+    mountFileReviewFooter(ctx, fileElement, filePath, isDarkMode);
+  }, ctx.signal);
+
+  // Inject inline comments next to diff lines as reviews complete
+  startInlineCommentInjection(isDarkMode, ctx.signal);
+
+  // Inject related files into GitLab's sidebar file tree
+  startRelatedFilesSidebar(isDarkMode, ctx.signal);
+
+  // Load cached review or auto-review if preference is enabled
+  await loadOrAutoReview(mrContext);
+}
 
 async function mountOverviewPanel(
   ctx: typeof ContentScriptContext.prototype,
