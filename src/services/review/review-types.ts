@@ -20,7 +20,7 @@ export type {
  * Tasks that the review orchestrator can execute.
  * Used by the streaming protocol to specify which tasks to run.
  */
-export type ReviewTask = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles';
+export type ReviewTask = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'fileActivity';
 
 /**
  * Progress tracking for the review pipeline.
@@ -31,6 +31,7 @@ export type ReviewProgress = {
   codeReview: TaskProgress;
   edgeCases: TaskProgress;
   relatedFiles: TaskProgress;
+  fileActivity: TaskProgress;
 };
 
 export type TaskProgress = {
@@ -53,4 +54,5 @@ export const INITIAL_REVIEW_PROGRESS: ReviewProgress = {
   codeReview: { ...INITIAL_TASK_PROGRESS },
   edgeCases: { ...INITIAL_TASK_PROGRESS },
   relatedFiles: { ...INITIAL_TASK_PROGRESS },
+  fileActivity: { ...INITIAL_TASK_PROGRESS },
 };

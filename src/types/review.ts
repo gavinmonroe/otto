@@ -194,6 +194,7 @@ export type MrContext = {
   description: string | null;
   sourceBranch: string;
   targetBranch: string;
+  authorUsername: string | null; // MR author's username (for self-review detection)
   diffFiles: DiffFileData[];
 };
 

@@ -162,11 +162,14 @@ function CommentRow({
   const ChevronIcon = expanded ? ChevronDown : ChevronRight;
 
   return (
-    <div style={{
-      ...s.commentRow,
-      opacity: isDismissed ? 0.5 : 1,
-      borderLeft: `3px solid ${config.color}`,
-    }}>
+    <div
+      data-otto-comment-id={comment.id}
+      style={{
+        ...s.commentRow,
+        opacity: isDismissed ? 0.5 : 1,
+        borderLeft: `3px solid ${config.color}`,
+      }}
+    >
       {/* Collapsed header — always visible */}
       <button
         onClick={() => setExpanded(!expanded)}

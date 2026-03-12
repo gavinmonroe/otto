@@ -28,6 +28,7 @@ import { startInlineCommentInjection } from '@/services/review/inline-injector';
 import { startRelatedFilesSidebar } from '@/services/review/sidebar-injector';
 import { startRiskInjection } from '@/services/review/risk-injector';
 import { startFollowUpButtonInjection } from '@/services/followup/followup-injector';
+import { startKeyboardManager } from '@/services/review/keyboard-manager';
 import { ChatPill } from '@/components/chat/ChatPill';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { useChatStore } from '@/services/chat/chat-store';
@@ -120,6 +121,9 @@ async function initDiffsFeatures(
 
   // Inject risk dots into GitLab's native file tree rows
   startRiskInjection(isDarkMode, ctx.signal);
+
+  // Start keyboard shortcut manager for review navigation
+  startKeyboardManager(ctx.signal);
 
   // Load cached review or auto-review if preference is enabled
   await loadOrAutoReview(mrContext);

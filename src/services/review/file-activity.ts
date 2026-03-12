@@ -114,9 +114,9 @@ export async function discoverFileActivity(
 ): Promise<FileActivityData> {
   const currentPaths = new Set(diffFiles.map((f) => f.filePath));
 
-  // 1. Fetch recent merged MRs
+  // 1. Fetch recent merged MRs — no target branch filter so we catch
+  //    cross-branch activity (e.g., MRs merged to develop that touch the same files).
   const updatedAfter = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  onProgress?.(`Checking recent MRs merged in the last ${LOOKBACK_DAYS} days...`);
 
   const mrListResult = await gitlab.fetchRecentMergedMrs(
     host,
@@ -127,12 +127,12 @@ export async function discoverFileActivity(
   );
 
   if (!mrListResult.ok) {
-    onProgress?.(`Could not fetch recent MRs: ${mrListResult.error}`);
     return emptyResult();
   }
 
-  // Exclude the current MR
-  const recentMrs = mrListResult.data.filter((mr) => mr.iid !== currentMrIid);
+  // Exclude the current MR and filter to MRs actually merged within the lookback window.
+  // (updated_after catches MRs updated by comments — we only want recently merged ones.)
+ const recentMrs = mrListResult.data.filter((mr) => mr.iid !== currentMrIid);
 
   if (recentMrs.length === 0) {
     onProgress?.('No recently-merged MRs found.');

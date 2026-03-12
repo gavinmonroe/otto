@@ -159,12 +159,28 @@ export function registerStreamHandler(handler: StreamHandler): void {
     if (port.name !== 'otto-stream') return;
 
     port.onMessage.addListener(async (request: StreamRequest) => {
+      // Keep the service worker alive while the stream is active.
+      // Chrome terminates service workers after ~30s of inactivity.
+      // Sending periodic no-op messages prevents port disconnection
+      // during long-running tasks (e.g., related files tool-calling).
+      const keepalive = setInterval(() => {
+        try {
+          port.postMessage({
+            type: 'STREAM_PROGRESS',
+            payload: { message: '' },
+          } satisfies StreamChunk);
+        } catch {
+          clearInterval(keepalive);
+        }
+      }, 20_000); // Every 20 seconds — well within Chrome's ~30s timeout
+
       try {
         await handler(request, (chunk) => {
           try {
             port.postMessage(chunk);
           } catch {
             // Port disconnected mid-stream — client navigated away
+            clearInterval(keepalive);
           }
         });
       } catch (error) {
@@ -179,6 +195,8 @@ export function registerStreamHandler(handler: StreamHandler): void {
         } catch {
           // Port already disconnected
         }
+      } finally {
+        clearInterval(keepalive);
       }
     });
   });

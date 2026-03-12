@@ -21,6 +21,7 @@ export type GitLabHost = {
   url: string;       // e.g., "https://gitlab.com" — no trailing slash
   pat: string;        // Personal Access Token (read_api scope minimum)
   label: string;      // User-friendly name, e.g., "Work GitLab"
+  username?: string;  // Authenticated user's username (populated on connection test)
 };
 
 export type AiConfig = {

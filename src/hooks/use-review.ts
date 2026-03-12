@@ -8,7 +8,7 @@
 
 import { useCallback, useRef, useEffect } from 'react';
 import { useReviewStore } from '@/services/review/review-store';
-import { startReviewStream } from '@/services/review/stream-dispatcher';
+import { startReviewStream, retryReviewTasks } from '@/services/review/stream-dispatcher';
 import { deleteCachedReview, computeDiffHash } from '@/services/review/review-cache';
 import type { ReviewTask } from '@/services/review/review-types';
 
@@ -59,6 +59,20 @@ export function useReview() {
     useReviewStore.getState().setError('Review cancelled');
   }, []);
 
+  /** Retry specific failed tasks without resetting existing results. */
+  const retryTasks = useCallback((tasks: ReviewTask[]) => {
+    const mrContext = useReviewStore.getState().mrContext;
+    if (!mrContext) return;
+
+    disconnectRef.current?.();
+
+    const disconnect = retryReviewTasks(mrContext, tasks, () => {
+      disconnectRef.current = null;
+    });
+
+    disconnectRef.current = disconnect;
+  }, []);
+
   return {
     mrContext: store.mrContext,
     status: store.status,
@@ -79,6 +93,7 @@ export function useReview() {
     startReview,
     regenerateReview,
     cancelReview,
+    retryTasks,
     updateCommentStatus: store.updateCommentStatus,
   };
 }

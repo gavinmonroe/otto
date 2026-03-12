@@ -161,6 +161,7 @@ export function MrOverviewPanel() {
             />
             <ProgressItem label="Edge Cases" status={review.progress.edgeCases.status} theme={theme} />
             <ProgressItem label="Related" status={review.progress.relatedFiles.status} theme={theme} />
+            <ProgressItem label="Recent MRs" status={review.progress.fileActivity.status} theme={theme} />
           </div>
           {review.progressMessage && (
             <div style={{
@@ -220,6 +221,56 @@ export function MrOverviewPanel() {
               }}>
                 <Markdown content={review.summary.riskAssessment} compact />
               </div>
+
+              {/* File Activity inline in summary */}
+              {review.status === 'complete' && !review.fileActivity && (
+                <div style={{
+                  fontSize: '12px',
+                  color: theme.textMuted,
+                  marginTop: '6px',
+                  padding: '4px 8px',
+                  background: theme.bgSubtle,
+                  borderRadius: '4px',
+                  fontStyle: 'italic',
+                }}>
+                  No recent file activity in the last 30 days.
+                </div>
+              )}
+              {review.fileActivity && review.fileActivity.fileActivities.length > 0 && (
+                <div style={{
+                  fontSize: '12px',
+                  marginTop: '6px',
+                  padding: '6px 8px',
+                  background: theme.bgSubtle,
+                  borderRadius: '4px',
+                  borderLeft: `3px solid ${theme.warning}`,
+                }}>
+                  <div style={{ fontWeight: 600, fontSize: '11px', color: theme.warning, marginBottom: '4px' }}>
+                    Recent File Activity
+                  </div>
+                  {review.fileActivity.fileActivities.map((activity) => (
+                    <div key={activity.filePath} style={{ marginBottom: '3px' }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: '11px', color: theme.text }}>
+                        {activity.filePath}
+                      </span>
+                      <span style={{ fontSize: '11px', color: theme.textMuted }}> — also in </span>
+                      {activity.recentMrs.map((mr, i) => (
+                        <span key={mr.iid} style={{ fontSize: '11px' }}>
+                          {i > 0 && ', '}
+                          <a
+                            href={mr.webUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: theme.brand, textDecoration: 'none' }}
+                          >
+                            !{mr.iid}
+                          </a>
+                        </span>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap' }}>
@@ -273,12 +324,32 @@ export function MrOverviewPanel() {
       )}
 
       {/* Related Files (collapsible) */}
-      {review.relatedFiles.length > 0 && (
+      {(review.relatedFiles.length > 0 || review.progress.relatedFiles?.status === 'error') && (
         <div style={s.section}>
           <button onClick={() => setShowRelated(!showRelated)} style={s.collapsibleHeader}>
-            <span>{showRelated ? '▾' : '▸'} Related Files ({review.relatedFiles.length})</span>
+            <span>
+              {showRelated ? '▾' : '▸'} Related Files
+              {review.relatedFiles.length > 0
+                ? ` (${review.relatedFiles.length})`
+                : review.progress.relatedFiles?.status === 'error'
+                  ? ' (failed)'
+                  : ''}
+            </span>
           </button>
-          {showRelated && <RelatedFilesPanel files={review.relatedFiles} />}
+          {showRelated && review.relatedFiles.length > 0 && (
+            <RelatedFilesPanel files={review.relatedFiles} />
+          )}
+          {showRelated && review.progress.relatedFiles?.status === 'error' && (
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{review.progress.relatedFiles.error || 'Related files discovery failed.'}</span>
+              <button
+                onClick={() => review.retryTasks(['relatedFiles'])}
+                style={s.retryButton}
+              >
+                Retry
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -299,8 +370,14 @@ export function MrOverviewPanel() {
             <EdgeCaseAnalysis edgeCases={review.edgeCases} />
           )}
           {showEdgeCases && review.progress.edgeCases.status === 'error' && review.progress.edgeCases.error && (
-            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px' }}>
-              {review.progress.edgeCases.error}
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{review.progress.edgeCases.error}</span>
+              <button
+                onClick={() => review.retryTasks(['edgeCases'])}
+                style={s.retryButton}
+              >
+                Retry
+              </button>
             </div>
           )}
           {showEdgeCases && !review.edgeCases.length && review.edgeCasesDelta && (
@@ -636,6 +713,18 @@ function buildStyles(t: OttoTheme) {
       alignItems: 'center',
       gap: '4px',
       width: '100%',
+    } as React.CSSProperties,
+
+    retryButton: {
+      padding: '3px 10px',
+      borderRadius: '4px',
+      background: t.btnSecondaryBg,
+      color: t.btnSecondaryText,
+      border: `1px solid ${t.btnSecondaryBorder}`,
+      fontSize: '11px',
+      fontWeight: 500,
+      cursor: 'pointer',
+      flexShrink: 0,
     } as React.CSSProperties,
   };
 }

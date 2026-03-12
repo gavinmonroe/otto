@@ -41,6 +41,17 @@ export async function executeReview(
 ): Promise<void> {
   const host = resolveHost(settings, context.hostUrl);
 
+  // Detect self-review: is the current user the MR author?
+  const isAuthorReview = !!(
+    host?.username &&
+    context.authorUsername &&
+    host.username.toLowerCase() === context.authorUsername.toLowerCase()
+  );
+
+  if (isAuthorReview) {
+    send({ type: 'STREAM_PROGRESS', payload: { message: 'Self-review mode: reviewing your own MR before requesting peer review.' } });
+  }
+
   // Start summary and ticket fetch in parallel — both are fast and independent.
   // This ensures the port stays alive while context enrichment runs.
   const taskPromises: Promise<void>[] = [];
@@ -48,8 +59,8 @@ export async function executeReview(
   // Fetch ticket context in parallel with everything else
   const ticketContextReady = fetchTicketContext(context, settings, send);
 
-  // Discover file activity (cross-MR awareness) in parallel — independent of AI tasks.
-  // Resolves to FileActivityData (possibly empty). Non-fatal: returns empty on failure.
+  // Discover file activity (cross-MR awareness) in parallel.
+  // Code review needs this data, but edge cases and related files don't.
   const fileActivityReady = runFileActivityTask(context, host, send);
 
   if (tasks.includes('summary')) {
@@ -66,14 +77,22 @@ export async function executeReview(
   send({ type: 'STREAM_PROGRESS', payload: { message: 'Fetching file context from repository...' } });
   const contextReady = prepareContext(context, tasks, host, send);
 
-  // Wait for context + tickets + file activity, then launch remaining tasks
-  const remainingTasks = Promise.all([contextReady, ticketContextReady, fileActivityReady]).then(
-    async ([{ fileContents, fileTreePaths, enrichedContext, repoConfig }, { formatted: ticketContext, tickets }, fileActivity]) => {
+  // Wait for context + tickets, then launch tasks.
+  // Code review also waits for file activity (needs per-file context).
+  // Edge cases and related files start immediately — they don't need file activity.
+  const remainingTasks = Promise.all([contextReady, ticketContextReady]).then(
+    async ([{ fileContents, fileTreePaths, enrichedContext, repoConfig }, { formatted: ticketContext, tickets }]) => {
       const remaining: Promise<void>[] = [];
 
       if (tasks.includes('codeReview')) {
-        send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${context.diffFiles.length} changed files...` } });
-        remaining.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, ticketContext, fileActivity, repoConfig, host, send));
+        // Code review waits for file activity so it can inject per-file context.
+        // File activity is fast (API calls only, no AI) so this doesn't cause timeouts.
+        remaining.push(
+          fileActivityReady.then((fileActivity) => {
+            send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${context.diffFiles.length} changed files...` } });
+            return runCodeReviewTask(context, settings, fileContents, enrichedContext, ticketContext, fileActivity, repoConfig, isAuthorReview, host, send);
+          }),
+        );
       }
 
       if (tasks.includes('edgeCases')) {
@@ -88,8 +107,10 @@ export async function executeReview(
         );
       }
 
-      // AC validation — runs in parallel with other tasks, needs raw ticket data
-      remaining.push(runAcValidationTask(context, settings, tickets, send));
+      // AC validation — only runs if tickets with acceptance criteria exist
+      if (tickets.size > 0) {
+        remaining.push(runAcValidationTask(context, settings, tickets, send));
+      }
 
       await Promise.all(remaining);
     });
@@ -349,6 +370,7 @@ async function runCodeReviewTask(
   ticketContext: string | null,
   fileActivity: FileActivityData | null,
   repoConfig: RepoConfig | null,
+  isAuthorReview: boolean,
   host: GitLabHost | null,
   send: SendChunk,
 ): Promise<void> {
@@ -474,6 +496,7 @@ async function runCodeReviewTask(
             reviewerPreferences,
             fileActivityContext,
             repoConfigContext: repoConfig ? formatRepoConfigForPrompt(repoConfig) : null,
+            isAuthorReview,
           },
           (delta) => send({
             type: 'STREAM_FILE_REVIEW_DELTA',
@@ -638,7 +661,10 @@ async function runFileActivityTask(
   host: GitLabHost | null,
   send: SendChunk,
 ): Promise<FileActivityData | null> {
-  if (!host || !context.projectId) return null;
+  if (!host || !context.projectId) {
+    send({ type: 'STREAM_TASK_ERROR', payload: { task: 'fileActivity', error: 'No GitLab host configured' } });
+    return null;
+  }
 
   try {
     const result = await discoverFileActivity(
@@ -655,12 +681,13 @@ async function runFileActivityTask(
       return result;
     }
 
+    // No overlapping activity found — still mark as complete (not error)
+    send({ type: 'STREAM_FILE_ACTIVITY_COMPLETE', payload: { fileActivity: result } });
     return null;
   } catch (error) {
-    // Non-fatal — review continues without file activity
     send({
-      type: 'STREAM_PROGRESS',
-      payload: { message: `File activity check failed: ${error instanceof Error ? error.message : 'unknown'}` },
+      type: 'STREAM_TASK_ERROR',
+      payload: { task: 'fileActivity', error: error instanceof Error ? error.message : 'File activity check failed' },
     });
     return null;
   }

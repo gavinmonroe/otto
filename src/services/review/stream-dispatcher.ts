@@ -116,12 +116,16 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
       break;
     case 'STREAM_FILE_ACTIVITY_COMPLETE':
       s.setFileActivity(chunk.payload.fileActivity);
+      s.setTaskStatus('fileActivity' as ReviewTask, 'complete');
       break;
     case 'STREAM_AC_VALIDATION_COMPLETE':
       s.setAcValidation(chunk.payload.acValidation);
       break;
     case 'STREAM_PROGRESS':
-      s.setProgressMessage(chunk.payload.message);
+      // Ignore empty keepalive messages from the service worker
+      if (chunk.payload.message) {
+        s.setProgressMessage(chunk.payload.message);
+      }
       break;
     case 'STREAM_TASK_ERROR': {
       const task = chunk.payload.task;
@@ -156,6 +160,64 @@ export async function tryLoadCachedReview(mrContext: MrContext): Promise<boolean
 }
 
 /**
+ * Retry specific failed tasks without resetting existing review results.
+ * Opens a new stream for just the specified tasks.
+ * Returns a disconnect function to cancel the stream.
+ */
+export function retryReviewTasks(
+  mrContext: MrContext,
+  tasks: ReviewTask[],
+  onDisconnect?: () => void,
+): () => void {
+  const store = useReviewStore.getState();
+
+  // Clear error state for the tasks being retried
+  for (const task of tasks) {
+    store.setTaskStatus(task, 'loading');
+  }
+
+  // Filter to stream-compatible tasks (fileActivity runs automatically in the orchestrator)
+  const streamTasks = tasks.filter(
+    (t): t is Exclude<ReviewTask, 'fileActivity'> => t !== 'fileActivity',
+  );
+
+  return openStream(
+    { type: 'STREAM_REVIEW', payload: { mrContext, tasks: streamTasks } },
+    {
+      onChunk: (chunk) => {
+        dispatchStreamChunk(chunk);
+
+        // Update cache when retry completes
+        if (chunk.type === 'STREAM_ALL_COMPLETE') {
+          const state = useReviewStore.getState();
+          const diffHash = computeDiffHash(mrContext.diffFiles);
+          const cached: CachedReview = {
+            version: 1,
+            projectPath: mrContext.projectPath,
+            mrIid: mrContext.mrIid,
+            diffHash,
+            timestamp: Date.now(),
+            summary: state.summary,
+            fileReviews: state.fileReviews,
+            relatedFiles: state.relatedFiles,
+            edgeCases: state.edgeCases,
+            fileDiffHashes: computeFileDiffHashes(mrContext.diffFiles),
+            ticketContext: state.ticketContext,
+            ticketKeys: state.ticketKeys,
+            fileActivity: state.fileActivity,
+            acValidation: state.acValidation,
+          };
+          saveCachedReview(cached);
+        }
+      },
+      onDisconnect: () => {
+        onDisconnect?.();
+      },
+    },
+  );
+}
+
+/**
  * Start a review stream and dispatch all chunks to the store.
  * Returns a disconnect function to cancel the stream.
  *
@@ -176,8 +238,13 @@ export function startReviewStream(
   store.startReview(tasks);
   store.setFileReviewsTotal(mrContext.diffFiles.length);
 
+  // Filter to stream-compatible tasks (fileActivity runs automatically in the orchestrator)
+  const streamTasks = tasks.filter(
+    (t): t is Exclude<ReviewTask, 'fileActivity'> => t !== 'fileActivity',
+  );
+
   return openStream(
-    { type: 'STREAM_REVIEW', payload: { mrContext, tasks } },
+    { type: 'STREAM_REVIEW', payload: { mrContext, tasks: streamTasks } },
     {
       onChunk: (chunk) => {
         dispatchStreamChunk(chunk);

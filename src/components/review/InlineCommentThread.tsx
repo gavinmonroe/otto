@@ -45,7 +45,7 @@ export function InlineCommentThread({ comment, onUpdateStatus }: InlineCommentTh
   const s = buildStyles(theme, config.color, isDismissed);
 
   return (
-    <div style={s.container}>
+    <div data-otto-comment-id={comment.id} style={s.container}>
       {/* Collapsed header — always visible */}
       <button onClick={() => setExpanded(!expanded)} style={s.header}>
         <div style={s.headerLeft}>

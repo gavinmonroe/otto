@@ -66,6 +66,8 @@ export type CodeReviewInput = {
   fileActivityContext: string | null;
   /** Project configuration from .otto.json */
   repoConfigContext: string | null;
+  /** Whether the current user is the MR author (self-review mode) */
+  isAuthorReview: boolean;
 };
 
 export function buildCodeReviewPrompt(input: CodeReviewInput, customSystemPrompt?: string): ChatMessage[] {
@@ -133,6 +135,18 @@ ${input.fileActivityContext}`;
     userContent += `
 
 ${input.repoConfigContext}`;
+  }
+
+  if (input.isAuthorReview) {
+    userContent += `
+
+## Self-Review Mode
+You are reviewing the author's own code before they request peer review. Adjust your approach:
+- Prioritize issues a peer reviewer would flag: bugs, missing error handling, edge cases, unclear naming.
+- Suppress style nitpicks — the author can fix those on their own.
+- Frame findings as "before requesting review, consider..." not "this code has a problem."
+- Flag missing test coverage for new behavior.
+- Call out anything that needs a comment or documentation for the reviewer's benefit.`;
   }
 
   return [

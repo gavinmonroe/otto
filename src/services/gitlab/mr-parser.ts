@@ -46,6 +46,7 @@ export async function buildMrContext(useApi = true): Promise<MrContext | null> {
   let sourceBranch = extractBranchFromDom('source');
   let targetBranch = extractBranchFromDom('target');
   let projectId: number | null = null;
+  let authorUsername: string | null = null;
 
   // Try to get project ID from the DOM
   const bodyEl = document.querySelector('body');
@@ -81,6 +82,7 @@ export async function buildMrContext(useApi = true): Promise<MrContext | null> {
           description = changesResult.data.mr.description;
           sourceBranch = changesResult.data.mr.source_branch;
           targetBranch = changesResult.data.mr.target_branch;
+          authorUsername = changesResult.data.mr.author?.username ?? null;
           // API diffs are more reliable (full text, not truncated)
           diffFiles = parseDiffFilesFromApi(changesResult.data.changes);
         }
@@ -95,6 +97,7 @@ export async function buildMrContext(useApi = true): Promise<MrContext | null> {
           description = mrResult.data.description;
           sourceBranch = mrResult.data.source_branch;
           targetBranch = mrResult.data.target_branch;
+          authorUsername = mrResult.data.author?.username ?? null;
         }
       }
     }
@@ -109,6 +112,7 @@ export async function buildMrContext(useApi = true): Promise<MrContext | null> {
     description,
     sourceBranch,
     targetBranch,
+    authorUsername,
     diffFiles,
   };
 }
