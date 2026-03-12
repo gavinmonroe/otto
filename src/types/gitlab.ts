@@ -36,6 +36,21 @@ export type GitLabMergeRequest = {
   } | null;
 };
 
+/**
+ * Lightweight MR summary for list endpoints — used by file activity feature.
+ * Intentionally separate from GitLabMergeRequest to keep the list response
+ * type minimal (we don't need diff_refs, labels, etc. for activity lookups).
+ */
+export type GitLabMergedMrSummary = {
+  iid: number;
+  title: string;
+  author: {
+    username: string;
+  };
+  web_url: string;
+  merged_at: string | null;    // ISO 8601 — null if not yet merged
+};
+
 export type GitLabDiffFile = {
   old_path: string;
   new_path: string;

@@ -24,6 +24,8 @@ export function MrOverviewPanel() {
   const theme = useTheme();
   const [showRelated, setShowRelated] = useState(false);
   const [showEdgeCases, setShowEdgeCases] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
+  const [showAcValidation, setShowAcValidation] = useState(true); // Open by default — high value
 
   const handleStartReview = useCallback(() => {
     const tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'> = ['summary', 'codeReview', 'edgeCases'];
@@ -240,6 +242,36 @@ export function MrOverviewPanel() {
         </div>
       )}
 
+      {/* Acceptance Criteria Validation */}
+      {review.acValidation && review.acValidation.results.length > 0 && (
+        <div style={s.section}>
+          <button onClick={() => setShowAcValidation(!showAcValidation)} style={s.collapsibleHeader}>
+            <span>
+              {showAcValidation ? '▾' : '▸'} Requirements Check
+              {' '}
+              <AcStatusPills acValidation={review.acValidation} theme={theme} />
+            </span>
+          </button>
+          {showAcValidation && (
+            <AcValidationPanel acValidation={review.acValidation} theme={theme} />
+          )}
+        </div>
+      )}
+
+      {/* Recent File Activity (collapsible) */}
+      {review.fileActivity && review.fileActivity.fileActivities.length > 0 && (
+        <div style={s.section}>
+          <button onClick={() => setShowActivity(!showActivity)} style={s.collapsibleHeader}>
+            <span>
+              {showActivity ? '▾' : '▸'} Recent Activity ({review.fileActivity.fileActivities.length} file{review.fileActivity.fileActivities.length !== 1 ? 's' : ''} with recent changes)
+            </span>
+          </button>
+          {showActivity && (
+            <FileActivitySummary fileActivity={review.fileActivity} theme={theme} hostUrl={review.mrContext?.hostUrl ?? ''} />
+          )}
+        </div>
+      )}
+
       {/* Related Files (collapsible) */}
       {review.relatedFiles.length > 0 && (
         <div style={s.section}>
@@ -288,6 +320,7 @@ export function MrOverviewPanel() {
 // ---------------------------------------------------------------------------
 
 import type { OttoTheme } from '@/components/ThemeContext';
+import type { FileActivityData, AcValidationData, AcValidationStatus } from '@/types/review';
 
 function ProgressItem({ label, status, theme }: { label: string; status: string; theme: OttoTheme }) {
   const color = status === 'complete' ? theme.success
@@ -302,6 +335,187 @@ function ProgressItem({ label, status, theme }: { label: string; status: string;
         width: '6px', height: '6px', borderRadius: '50%', background: color,
       }} />
       <span style={{ color }}>{label}</span>
+    </div>
+  );
+}
+
+function FileActivitySummary({ fileActivity, theme, hostUrl }: { fileActivity: FileActivityData; theme: OttoTheme; hostUrl: string }) {
+  return (
+    <div style={{ marginTop: '8px', fontSize: '12px' }}>
+      <div style={{
+        fontSize: '11px',
+        color: theme.textMuted,
+        marginBottom: '6px',
+      }}>
+        {fileActivity.totalRecentMrs} MR{fileActivity.totalRecentMrs !== 1 ? 's' : ''} merged in the last {fileActivity.lookbackDays} days touched files in this diff.
+      </div>
+      {fileActivity.fileActivities.map((activity) => (
+        <div key={activity.filePath} style={{
+          padding: '6px 8px',
+          marginBottom: '4px',
+          background: theme.bgSubtle,
+          borderRadius: '4px',
+          borderLeft: `3px solid ${theme.warning}`,
+        }}>
+          <div style={{
+            fontWeight: 500,
+            fontSize: '12px',
+            marginBottom: '3px',
+            fontFamily: 'monospace',
+            color: theme.text,
+          }}>
+            {activity.filePath.split('/').pop()}
+            <span style={{ color: theme.textMuted, fontWeight: 400, marginLeft: '4px' }}>
+              {activity.filePath.includes('/') ? activity.filePath.slice(0, activity.filePath.lastIndexOf('/')) : ''}
+            </span>
+          </div>
+          {activity.recentMrs.map((mr) => {
+            const daysAgo = Math.round(
+              (Date.now() - new Date(mr.mergedAt).getTime()) / (24 * 60 * 60 * 1000),
+            );
+            return (
+              <div key={mr.iid} style={{
+                fontSize: '11px',
+                color: theme.textSecondary,
+                marginLeft: '4px',
+                lineHeight: '1.5',
+              }}>
+                <a
+                  href={mr.webUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: theme.brand, textDecoration: 'none' }}
+                >
+                  !{mr.iid}
+                </a>
+                {' '}{mr.title.length > 60 ? mr.title.slice(0, 60) + '\u2026' : mr.title}
+                {' '}<span style={{ color: theme.textMuted }}>@{mr.author} · {daysAgo}d ago</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AcStatusPills({ acValidation, theme }: { acValidation: AcValidationData; theme: OttoTheme }) {
+  const { satisfiedCount, unclearCount, notFoundCount } = acValidation;
+  return (
+    <span style={{ display: 'inline-flex', gap: '4px', marginLeft: '4px' }}>
+      {satisfiedCount > 0 && (
+        <span style={{
+          fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
+          background: theme.isDark ? '#064e3b' : '#f0fdf4',
+          color: theme.isDark ? '#4ade80' : '#16a34a',
+          fontWeight: 600,
+        }}>
+          {satisfiedCount} met
+        </span>
+      )}
+      {unclearCount > 0 && (
+        <span style={{
+          fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
+          background: theme.isDark ? '#451a03' : '#fffbeb',
+          color: theme.isDark ? '#fbbf24' : '#d97706',
+          fontWeight: 600,
+        }}>
+          {unclearCount} unclear
+        </span>
+      )}
+      {notFoundCount > 0 && (
+        <span style={{
+          fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
+          background: theme.isDark ? '#450a0a' : '#fef2f2',
+          color: theme.isDark ? '#fca5a5' : '#dc2626',
+          fontWeight: 600,
+        }}>
+          {notFoundCount} not found
+        </span>
+      )}
+    </span>
+  );
+}
+
+function AcValidationPanel({ acValidation, theme }: { acValidation: AcValidationData; theme: OttoTheme }) {
+  const statusConfig: Record<AcValidationStatus, { icon: string; color: string; bg: string }> = {
+    satisfied: {
+      icon: '\u2713',
+      color: theme.isDark ? '#4ade80' : '#16a34a',
+      bg: theme.isDark ? '#064e3b' : '#f0fdf4',
+    },
+    unclear: {
+      icon: '?',
+      color: theme.isDark ? '#fbbf24' : '#d97706',
+      bg: theme.isDark ? '#451a03' : '#fffbeb',
+    },
+    'not-found': {
+      icon: '\u2717',
+      color: theme.isDark ? '#fca5a5' : '#dc2626',
+      bg: theme.isDark ? '#450a0a' : '#fef2f2',
+    },
+  };
+
+  return (
+    <div style={{ marginTop: '8px', fontSize: '12px' }}>
+      {acValidation.results.map((result) => (
+        <div key={result.ticketKey}>
+          {acValidation.results.length > 1 && (
+            <div style={{
+              fontSize: '11px', fontWeight: 600, color: theme.textSecondary,
+              marginBottom: '4px', marginTop: '4px',
+            }}>
+              {result.ticketKey}
+            </div>
+          )}
+          {result.criteria.map((criterion, i) => {
+            const config = statusConfig[criterion.status];
+            return (
+              <div key={i} style={{
+                padding: '6px 8px',
+                marginBottom: '4px',
+                background: config.bg,
+                borderRadius: '4px',
+                borderLeft: `3px solid ${config.color}`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                  <span style={{
+                    fontWeight: 700, color: config.color, fontSize: '13px',
+                    lineHeight: '1.4', flexShrink: 0, width: '14px', textAlign: 'center',
+                  }}>
+                    {config.icon}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500, color: theme.text, lineHeight: '1.4' }}>
+                      {criterion.criterion}
+                    </div>
+                    <div style={{ color: theme.textSecondary, marginTop: '2px', fontSize: '11px' }}>
+                      <Markdown content={criterion.explanation} compact />
+                    </div>
+                    {criterion.evidence.length > 0 && (
+                      <div style={{ marginTop: '3px', fontSize: '11px', color: theme.textMuted }}>
+                        {criterion.evidence.map((e, j) => (
+                          <span key={j} style={{ fontFamily: 'monospace' }}>
+                            {j > 0 && ', '}
+                            {e.filePath.split('/').pop()}
+                            {e.startLine ? `:${e.startLine}` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{
+            fontSize: '11px', color: theme.textMuted, marginTop: '4px',
+            fontStyle: 'italic',
+          }}>
+            {result.summary}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

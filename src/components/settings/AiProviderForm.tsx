@@ -21,6 +21,7 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   relatedFiles: 'Related Files',
   followUp: 'Comment Follow-Up',
   chat: 'MR Chat Q&A',
+  acValidation: 'AC Validation',
 };
 
 export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {

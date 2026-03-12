@@ -22,6 +22,8 @@ import type {
   RelatedFile,
   EdgeCase,
   DiffFileData,
+  FileActivityData,
+  AcValidationData,
 } from '@/types/review';
 
 const CACHE_PREFIX = 'otto_review:';
@@ -44,6 +46,10 @@ export type CachedReview = {
   ticketContext?: string | null;
   /** Ticket keys (e.g., ["PROJ-123"]) extracted from the MR. */
   ticketKeys?: string[];
+  /** Cross-MR file activity data. Null if no overlapping MRs found. */
+  fileActivity?: FileActivityData | null;
+  /** Acceptance criteria validation results. Null if no tickets with AC. */
+  acValidation?: AcValidationData | null;
 };
 
 /**

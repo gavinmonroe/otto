@@ -114,6 +114,12 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
     case 'STREAM_TICKET_CONTEXT':
       s.setTicketContext(chunk.payload.ticketContext, chunk.payload.ticketKeys);
       break;
+    case 'STREAM_FILE_ACTIVITY_COMPLETE':
+      s.setFileActivity(chunk.payload.fileActivity);
+      break;
+    case 'STREAM_AC_VALIDATION_COMPLETE':
+      s.setAcValidation(chunk.payload.acValidation);
+      break;
     case 'STREAM_PROGRESS':
       s.setProgressMessage(chunk.payload.message);
       break;
@@ -193,6 +199,8 @@ export function startReviewStream(
             fileDiffHashes: computeFileDiffHashes(mrContext.diffFiles),
             ticketContext: state.ticketContext,
             ticketKeys: state.ticketKeys,
+            fileActivity: state.fileActivity,
+            acValidation: state.acValidation,
           };
           saveCachedReview(cached);
         }

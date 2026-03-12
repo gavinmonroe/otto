@@ -25,6 +25,8 @@ import type {
   RelatedFile,
   EdgeCase,
   ReviewStatus,
+  FileActivityData,
+  AcValidationData,
 } from '@/types/review';
 import type { FollowUpAnalysis, FollowUpStatus } from '@/types/followup';
 import type { ReviewProgress, ReviewTask } from './review-types';
@@ -58,6 +60,12 @@ type ReviewState = {
   // Ticket context (from Jira etc.)
   ticketContext: string | null;
   ticketKeys: string[];
+
+  // File activity (cross-MR awareness)
+  fileActivity: FileActivityData | null;
+
+  // Acceptance criteria validation
+  acValidation: AcValidationData | null;
 
   // Timestamps
   startedAt: number | null;
@@ -102,6 +110,12 @@ type ReviewActions = {
   // Ticket context
   setTicketContext: (ticketContext: string, ticketKeys: string[]) => void;
 
+  // File activity
+  setFileActivity: (data: FileActivityData) => void;
+
+  // Acceptance criteria validation
+  setAcValidation: (data: AcValidationData) => void;
+
   // Task progress
   setTaskStatus: (task: ReviewTask, status: ReviewProgress[ReviewTask]['status'], error?: string) => void;
 
@@ -130,6 +144,8 @@ const INITIAL_STATE: ReviewState = {
   edgeCasesDelta: '',
   ticketContext: null,
   ticketKeys: [],
+  fileActivity: null,
+  acValidation: null,
   startedAt: null,
   completedAt: null,
   followUps: {},
@@ -169,6 +185,8 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
       edgeCasesDelta: '',
       ticketContext: cached.ticketContext ?? null,
       ticketKeys: cached.ticketKeys ?? [],
+      fileActivity: cached.fileActivity ?? null,
+      acValidation: cached.acValidation ?? null,
       startedAt: cached.timestamp,
       completedAt: cached.timestamp,
     });
@@ -291,6 +309,10 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
     ticketContext,
     ticketKeys,
   }),
+
+  setFileActivity: (data) => set({ fileActivity: data }),
+
+  setAcValidation: (data) => set({ acValidation: data }),
 
   // Task progress — also clears delta for the failed task
   setTaskStatus: (task, status, error) => set((state) => {

@@ -62,6 +62,10 @@ export type CodeReviewInput = {
   ticketContext: string | null;
   /** Reviewer preferences learned from past reviews + repo facts */
   reviewerPreferences: string | null;
+  /** Recent MR activity for this file (cross-MR awareness) */
+  fileActivityContext: string | null;
+  /** Project configuration from .otto.json */
+  repoConfigContext: string | null;
 };
 
 export function buildCodeReviewPrompt(input: CodeReviewInput, customSystemPrompt?: string): ChatMessage[] {
@@ -117,6 +121,18 @@ ${input.ticketContext}`;
     userContent += `
 
 ${input.reviewerPreferences}`;
+  }
+
+  if (input.fileActivityContext) {
+    userContent += `
+
+${input.fileActivityContext}`;
+  }
+
+  if (input.repoConfigContext) {
+    userContent += `
+
+${input.repoConfigContext}`;
   }
 
   return [

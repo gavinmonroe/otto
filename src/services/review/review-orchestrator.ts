@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { OttoSettings, GitLabHost } from '@/types/settings';
-import type { MrContext, RelatedFile } from '@/types/review';
+import type { MrContext, RelatedFile, FileActivityData, AcValidationData, AcValidationResult } from '@/types/review';
 import type { StreamChunk } from '@/types/messages';
 import type { ReviewTask } from './review-types';
 import type { TicketInfo } from '@/types/ticket';
@@ -22,6 +22,10 @@ import { loadCachedTickets, saveCachedTicket } from '../ticket/ticket-cache';
 import { loadPreferences, formatPreferencesForPrompt, incrementReviewCount } from './reviewer-prefs';
 import { fetchJiraTicket } from '../ticket/jira-client';
 import { loadLatestCachedReview, computeFileDiffHash } from './review-cache';
+import { discoverFileActivity, formatFileActivityForPrompt } from './file-activity';
+import { parseAcceptanceCriteria } from '../ticket/ac-parser';
+import { fetchRepoConfig, formatRepoConfigForPrompt } from './repo-config';
+import type { RepoConfig } from './repo-config';
 import { normalizeUrl } from '@/lib/utils';
 
 type SendChunk = (chunk: StreamChunk) => void;
@@ -44,12 +48,16 @@ export async function executeReview(
   // Fetch ticket context in parallel with everything else
   const ticketContextReady = fetchTicketContext(context, settings, send);
 
+  // Discover file activity (cross-MR awareness) in parallel — independent of AI tasks.
+  // Resolves to FileActivityData (possibly empty). Non-fatal: returns empty on failure.
+  const fileActivityReady = runFileActivityTask(context, host, send);
+
   if (tasks.includes('summary')) {
     send({ type: 'STREAM_PROGRESS', payload: { message: 'Generating MR summary...' } });
     // Summary can use ticket context — wait for it
     taskPromises.push(
-      ticketContextReady.then((ticketContext) =>
-        runSummaryTask(context, settings, ticketContext, send),
+      ticketContextReady.then(({ formatted }) =>
+        runSummaryTask(context, settings, formatted, send),
       ),
     );
   }
@@ -58,14 +66,14 @@ export async function executeReview(
   send({ type: 'STREAM_PROGRESS', payload: { message: 'Fetching file context from repository...' } });
   const contextReady = prepareContext(context, tasks, host, send);
 
-  // Wait for context + tickets, then launch remaining tasks
-  const remainingTasks = Promise.all([contextReady, ticketContextReady]).then(
-    async ([{ fileContents, fileTreePaths, enrichedContext }, ticketContext]) => {
+  // Wait for context + tickets + file activity, then launch remaining tasks
+  const remainingTasks = Promise.all([contextReady, ticketContextReady, fileActivityReady]).then(
+    async ([{ fileContents, fileTreePaths, enrichedContext, repoConfig }, { formatted: ticketContext, tickets }, fileActivity]) => {
       const remaining: Promise<void>[] = [];
 
       if (tasks.includes('codeReview')) {
         send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${context.diffFiles.length} changed files...` } });
-        remaining.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, ticketContext, host, send));
+        remaining.push(runCodeReviewTask(context, settings, fileContents, enrichedContext, ticketContext, fileActivity, repoConfig, host, send));
       }
 
       if (tasks.includes('edgeCases')) {
@@ -79,6 +87,9 @@ export async function executeReview(
           runRelatedFilesTask(context, settings, fileContents, fileTreePaths, host, send),
         );
       }
+
+      // AC validation — runs in parallel with other tasks, needs raw ticket data
+      remaining.push(runAcValidationTask(context, settings, tickets, send));
 
       await Promise.all(remaining);
     });
@@ -98,6 +109,7 @@ type PreparedContext = {
   fileContents: Map<string, string>;
   fileTreePaths: string[];
   enrichedContext: EnrichedContext | null;
+  repoConfig: RepoConfig | null;
   ticketContext: string | null;
 };
 
@@ -110,10 +122,21 @@ async function prepareContext(
   const fileContents = new Map<string, string>();
   let fileTreePaths: string[] = [];
   let enrichedContext: EnrichedContext | null = null;
+  let repoConfig: RepoConfig | null = null;
 
   if (!host || !context.projectId) {
-    return { fileContents, fileTreePaths, enrichedContext, ticketContext: null };
+    return { fileContents, fileTreePaths, enrichedContext, repoConfig, ticketContext: null };
   }
+
+  // Fetch .otto.json repo config in parallel with file contents
+  const repoConfigReady = fetchRepoConfig(host, context.projectId, context.sourceBranch)
+    .then((config) => {
+      if (config) {
+        send({ type: 'STREAM_PROGRESS', payload: { message: 'Loaded .otto.json project configuration.' } });
+      }
+      return config;
+    })
+    .catch(() => null); // Non-fatal
 
   // Fetch file contents for changed files (from target branch, for context)
   const contentTasks = context.diffFiles
@@ -167,18 +190,26 @@ async function prepareContext(
     // Non-fatal — file tree fetch failed
   }
 
-  return { fileContents, fileTreePaths, enrichedContext, ticketContext: null };
+  repoConfig = await repoConfigReady;
+
+  return { fileContents, fileTreePaths, enrichedContext, repoConfig, ticketContext: null };
 }
+
+type TicketContextResult = {
+  formatted: string | null;
+  tickets: Map<string, TicketInfo>;
+};
 
 async function fetchTicketContext(
   context: MrContext,
   settings: OttoSettings,
   send: SendChunk,
-): Promise<string | null> {
+): Promise<TicketContextResult> {
+  const empty: TicketContextResult = { formatted: null, tickets: new Map() };
   const providers = settings.tickets?.providers ?? [];
   if (providers.length === 0) {
     send({ type: 'STREAM_PROGRESS', payload: { message: 'No ticket providers configured — skipping ticket context.' } });
-    return null;
+    return empty;
   }
 
   const ticketKeys = extractTicketRefs(
@@ -190,7 +221,7 @@ async function fetchTicketContext(
 
   if (ticketKeys.length === 0) {
     send({ type: 'STREAM_PROGRESS', payload: { message: 'No ticket references found in MR title, description, or branch name.' } });
-    return null;
+    return empty;
   }
 
   send({ type: 'STREAM_PROGRESS', payload: { message: `Found ticket refs: ${ticketKeys.join(', ')}. Fetching context...` } });
@@ -232,7 +263,7 @@ async function fetchTicketContext(
     }
   }
 
-  if (tickets.size === 0) return null;
+  if (tickets.size === 0) return empty;
 
   const resolvedKeys = Array.from(tickets.keys());
   const formatted = formatTicketContext(tickets);
@@ -243,7 +274,7 @@ async function fetchTicketContext(
     payload: { ticketContext: formatted, ticketKeys: resolvedKeys },
   });
 
-  return formatted;
+  return { formatted, tickets };
 }
 
 function formatTicketContext(tickets: Map<string, TicketInfo>): string {
@@ -316,6 +347,8 @@ async function runCodeReviewTask(
   fileContents: Map<string, string>,
   enrichedContext: EnrichedContext | null,
   ticketContext: string | null,
+  fileActivity: FileActivityData | null,
+  repoConfig: RepoConfig | null,
   host: GitLabHost | null,
   send: SendChunk,
 ): Promise<void> {
@@ -408,6 +441,26 @@ async function runCodeReviewTask(
           }
         }
 
+        // Build per-file activity context (cross-MR awareness)
+        let fileActivityContext: string | null = null;
+        if (fileActivity) {
+          const activity = fileActivity.fileActivities.find((a) => a.filePath === file.filePath);
+          if (activity && activity.recentMrs.length > 0) {
+            const lines = [
+              `## Recent Activity (last ${fileActivity.lookbackDays} days)`,
+              `This file was also modified in recently-merged MRs. Watch for integration issues.`,
+              '',
+            ];
+            for (const mr of activity.recentMrs) {
+              const daysAgo = Math.round(
+                (Date.now() - new Date(mr.mergedAt).getTime()) / (24 * 60 * 60 * 1000),
+              );
+              lines.push(`- !${mr.iid} "${mr.title}" by @${mr.author} (merged ${daysAgo}d ago)`);
+            }
+            fileActivityContext = lines.join('\n');
+          }
+        }
+
         const result = await aiService.generateFileReview(
           settings.ai,
           {
@@ -419,6 +472,8 @@ async function runCodeReviewTask(
             callerSnippets,
             ticketContext,
             reviewerPreferences,
+            fileActivityContext,
+            repoConfigContext: repoConfig ? formatRepoConfigForPrompt(repoConfig) : null,
           },
           (delta) => send({
             type: 'STREAM_FILE_REVIEW_DELTA',
@@ -573,6 +628,126 @@ async function runRelatedFilesTask(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Discover file activity (cross-MR awareness) and send results to the UI.
+ * Runs in parallel with other tasks. Non-fatal — returns empty data on failure.
+ */
+async function runFileActivityTask(
+  context: MrContext,
+  host: GitLabHost | null,
+  send: SendChunk,
+): Promise<FileActivityData | null> {
+  if (!host || !context.projectId) return null;
+
+  try {
+    const result = await discoverFileActivity(
+      host,
+      context.projectId,
+      context.mrIid,
+      context.targetBranch,
+      context.diffFiles,
+      (message) => send({ type: 'STREAM_PROGRESS', payload: { message } }),
+    );
+
+    if (result.fileActivities.length > 0) {
+      send({ type: 'STREAM_FILE_ACTIVITY_COMPLETE', payload: { fileActivity: result } });
+      return result;
+    }
+
+    return null;
+  } catch (error) {
+    // Non-fatal — review continues without file activity
+    send({
+      type: 'STREAM_PROGRESS',
+      payload: { message: `File activity check failed: ${error instanceof Error ? error.message : 'unknown'}` },
+    });
+    return null;
+  }
+}
+
+/**
+ * Validate acceptance criteria from linked tickets against the MR diff.
+ * Runs in parallel with other tasks. Non-fatal — silently skips if no AC found.
+ */
+async function runAcValidationTask(
+  context: MrContext,
+  settings: OttoSettings,
+  tickets: Map<string, TicketInfo>,
+  send: SendChunk,
+): Promise<void> {
+  // Only run if we have tickets with acceptance criteria
+  const ticketsWithAc: Array<{ key: string; ticket: TicketInfo; criteria: string[] }> = [];
+
+  for (const [key, ticket] of tickets) {
+    if (ticket.acceptanceCriteria) {
+      const criteria = parseAcceptanceCriteria(ticket.acceptanceCriteria);
+      if (criteria.length > 0) {
+        ticketsWithAc.push({ key, ticket, criteria });
+      }
+    }
+  }
+
+  if (ticketsWithAc.length === 0) return;
+
+  send({ type: 'STREAM_PROGRESS', payload: { message: `Validating acceptance criteria for ${ticketsWithAc.map((t) => t.key).join(', ')}...` } });
+
+  const results: AcValidationResult[] = [];
+
+  for (const { key, ticket, criteria } of ticketsWithAc) {
+    try {
+      const result = await aiService.validateAcceptanceCriteria(
+        settings.ai,
+        {
+          ticketKey: key,
+          criteria,
+          diffFiles: context.diffFiles,
+          mrTitle: context.title,
+          mrDescription: context.description,
+          ticketTitle: ticket.title,
+          ticketDescription: ticket.description,
+        },
+      );
+
+      if (result.ok) {
+        results.push(result.data);
+      } else {
+        send({
+          type: 'STREAM_PROGRESS',
+          payload: { message: `AC validation for ${key} failed: ${result.error}` },
+        });
+      }
+    } catch (error) {
+      send({
+        type: 'STREAM_PROGRESS',
+        payload: { message: `AC validation for ${key} error: ${error instanceof Error ? error.message : 'unknown'}` },
+      });
+    }
+  }
+
+  if (results.length > 0) {
+    let satisfiedCount = 0;
+    let unclearCount = 0;
+    let notFoundCount = 0;
+
+    for (const result of results) {
+      for (const c of result.criteria) {
+        if (c.status === 'satisfied') satisfiedCount++;
+        else if (c.status === 'unclear') unclearCount++;
+        else notFoundCount++;
+      }
+    }
+
+    const acValidation: AcValidationData = {
+      results,
+      satisfiedCount,
+      unclearCount,
+      notFoundCount,
+    };
+
+    send({ type: 'STREAM_AC_VALIDATION_COMPLETE', payload: { acValidation } });
+  }
+}
 
 function resolveHost(settings: OttoSettings, hostUrl: string): GitLabHost | null {
   const normalized = normalizeUrl(hostUrl).toLowerCase();

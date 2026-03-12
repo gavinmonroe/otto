@@ -91,6 +91,96 @@ export type MrReview = {
 };
 
 // ---------------------------------------------------------------------------
+// File Activity — cross-MR awareness for files in the current diff.
+//
+// Surfaces recently-merged MRs that touched the same files, giving the
+// reviewer instant context about what's been changing around the code.
+// Used by: MrOverviewPanel (aggregate), FileReviewFooter (per-file),
+// ReviewQueuePanel (churn indicator), AI prompts (integration risk context).
+// ---------------------------------------------------------------------------
+
+/**
+ * A recently-merged MR that touched one or more files in the current diff.
+ * Intentionally lightweight — we only store what the UI and prompts need.
+ */
+export type RecentMr = {
+  iid: number;
+  title: string;
+  author: string;              // username, not display name (shorter, linkable)
+  mergedAt: string;            // ISO 8601 date string
+  webUrl: string;
+};
+
+/**
+ * Activity summary for a single file in the current diff.
+ * Contains the list of recent MRs that modified this file.
+ */
+export type FileActivity = {
+  filePath: string;
+  recentMrs: RecentMr[];       // Sorted by mergedAt descending (most recent first)
+};
+
+/**
+ * Top-level container for all file activity data.
+ * Stored in the review cache and passed to the AI prompt builder.
+ */
+export type FileActivityData = {
+  fileActivities: FileActivity[];  // Only files that have activity (sparse)
+  totalRecentMrs: number;          // Unique MR count across all files
+  lookbackDays: number;            // How far back we searched (for display)
+};
+
+// ---------------------------------------------------------------------------
+// Acceptance Criteria Validation — checks the diff against ticket requirements.
+//
+// The AI validates each acceptance criterion from linked Jira tickets against
+// the actual code changes. Used by: MrOverviewPanel (requirements checklist),
+// summary risk assessment (unmet criteria bump risk), self-review mode.
+// ---------------------------------------------------------------------------
+
+export type AcValidationStatus = 'satisfied' | 'unclear' | 'not-found';
+
+/**
+ * Validation result for a single acceptance criterion.
+ */
+export type AcCriterionResult = {
+  criterion: string;               // The original criterion text
+  status: AcValidationStatus;
+  explanation: string;             // Why this status was assigned (markdown)
+  evidence: AcEvidence[];          // Files/lines that support the verdict
+};
+
+/**
+ * A piece of evidence linking a criterion to code in the diff.
+ */
+export type AcEvidence = {
+  filePath: string;
+  startLine: number | null;
+  endLine: number | null;
+  snippet: string | null;          // Brief code excerpt (for display)
+};
+
+/**
+ * Top-level container for all AC validation results.
+ * One per ticket — if multiple tickets are linked, there are multiple results.
+ */
+export type AcValidationResult = {
+  ticketKey: string;
+  criteria: AcCriterionResult[];
+  summary: string;                 // One-line overall assessment
+};
+
+/**
+ * Aggregated AC validation data across all linked tickets.
+ */
+export type AcValidationData = {
+  results: AcValidationResult[];
+  satisfiedCount: number;
+  unclearCount: number;
+  notFoundCount: number;
+};
+
+// ---------------------------------------------------------------------------
 // MR Context — extracted from the page DOM + GitLab API, passed to services.
 // This is the "input" to the review pipeline.
 // ---------------------------------------------------------------------------

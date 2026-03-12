@@ -19,7 +19,7 @@ import { Markdown } from '@/components/Markdown';
 import { SuggestionDiff } from '@/components/SuggestionDiff';
 import { ReviewActions } from './ReviewActions';
 import { OttoLogo } from '@/components/OttoLogo';
-import type { ReviewComment as ReviewCommentType, ReviewCommentStatus } from '@/types/review';
+import type { ReviewComment as ReviewCommentType, ReviewCommentStatus, FileActivity } from '@/types/review';
 
 type FileReviewFooterProps = {
   filePath: string;
@@ -33,6 +33,10 @@ export function FileReviewFooter({ filePath }: FileReviewFooterProps) {
   const fileReviewDelta = useReviewStore((s) => s.fileReviewDeltas[filePath]);
   const overallStatus = useReviewStore((s) => s.status);
   const updateCommentStatus = useReviewStore((s) => s.updateCommentStatus);
+  const fileActivityEntry = useReviewStore((s) => {
+    if (!s.fileActivity) return null;
+    return s.fileActivity.fileActivities.find((a) => a.filePath === filePath) ?? null;
+  });
 
   const isStreaming = !!fileReviewDelta && !fileReview;
   const isReviewActive = overallStatus === 'loading' || overallStatus === 'streaming';
@@ -79,6 +83,40 @@ export function FileReviewFooter({ filePath }: FileReviewFooterProps) {
             </span>
           </div>
           <span style={{ fontSize: '11px', color: theme.textMuted }}>{fileReview.summary}</span>
+        </div>
+      )}
+
+      {/* Recent file activity banner */}
+      {fileActivityEntry && fileActivityEntry.recentMrs.length > 0 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '5px 14px',
+          fontSize: '11px',
+          color: theme.warning,
+          background: theme.isDark ? '#451a0320' : '#fffbeb80',
+          borderBottom: `1px solid ${theme.borderSubtle}`,
+        }}>
+          <AlertTriangle size={12} style={{ flexShrink: 0 }} />
+          <span>
+            Also modified in {fileActivityEntry.recentMrs.length} recent MR{fileActivityEntry.recentMrs.length !== 1 ? 's' : ''}:
+            {' '}
+            {fileActivityEntry.recentMrs.slice(0, 3).map((mr, i) => (
+              <span key={mr.iid}>
+                {i > 0 && ', '}
+                <a
+                  href={mr.webUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: theme.brand, textDecoration: 'none' }}
+                >
+                  !{mr.iid}
+                </a>
+              </span>
+            ))}
+            {fileActivityEntry.recentMrs.length > 3 && ` +${fileActivityEntry.recentMrs.length - 3} more`}
+          </span>
         </div>
       )}
 

@@ -24,6 +24,8 @@ import type {
   ReviewComment,
   EdgeCase,
   DiffFileData,
+  AcValidationResult,
+  AcCriterionResult,
 } from '@/types/review';
 import type { Result } from '@/types/messages';
 import { chatCompletion, chatCompletionStream } from './ai-client';
@@ -39,6 +41,8 @@ import { buildFollowUpPrompt } from './prompts/followup';
 import type { FollowUpInput } from './prompts/followup';
 import type { FollowUpAnalysis, FollowUpAction } from '@/types/followup';
 import { buildChatPrompt } from './prompts/chat';
+import { buildAcValidationPrompt } from './prompts/ac-validation';
+import type { AcValidationInput } from './prompts/ac-validation';
 import type { ChatReviewContext } from '@/types/messages';
 import type { ChatMessage as UiChatMessage, SuggestedQuestion } from '@/types/chat';
 import { generateId } from '@/lib/utils';
@@ -655,6 +659,55 @@ export async function generateChatResponse(
     data: {
       content,
       suggestedQuestions: questions,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Acceptance Criteria Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate acceptance criteria from a linked ticket against the MR diff.
+ * Non-streaming — returns the full validation result at once.
+ */
+export async function validateAcceptanceCriteria(
+  aiConfig: AiConfig,
+  input: AcValidationInput,
+  signal?: AbortSignal,
+): Promise<Result<AcValidationResult>> {
+  const messages = buildAcValidationPrompt(input, getCustomPrompt(aiConfig, 'acValidation'));
+  const config = getClientConfig(aiConfig);
+  const model = getModel(aiConfig, 'acValidation');
+  const temperature = getTemperature(aiConfig, 'acValidation');
+  const max_tokens = getMaxTokens(aiConfig, 'acValidation');
+
+  const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
+  if (!result.ok) return result;
+
+  const content = result.data.choices[0]?.message?.content || '';
+  const parsed = parseAiJson<{ criteria: AcCriterionResult[]; summary: string }>(content, 'AC validation');
+  if (!parsed.ok) return parsed;
+
+  // Normalize and validate the response
+  const criteria = (parsed.data.criteria || []).map((c, i) => ({
+    criterion: c.criterion || input.criteria[i] || `Criterion ${i + 1}`,
+    status: (['satisfied', 'unclear', 'not-found'].includes(c.status) ? c.status : 'unclear') as AcCriterionResult['status'],
+    explanation: c.explanation || '',
+    evidence: Array.isArray(c.evidence) ? c.evidence.map((e) => ({
+      filePath: e.filePath || '',
+      startLine: typeof e.startLine === 'number' ? e.startLine : null,
+      endLine: typeof e.endLine === 'number' ? e.endLine : null,
+      snippet: e.snippet || null,
+    })) : [],
+  }));
+
+  return {
+    ok: true,
+    data: {
+      ticketKey: input.ticketKey,
+      criteria,
+      summary: parsed.data.summary || `${criteria.filter((c) => c.status === 'satisfied').length} of ${criteria.length} criteria satisfied.`,
     },
   };
 }

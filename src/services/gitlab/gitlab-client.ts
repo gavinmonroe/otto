@@ -21,6 +21,7 @@ import type {
   GitLabTreeItem,
   GitLabBlameRange,
   GitLabDiscussion,
+  GitLabMergedMrSummary,
 } from '@/types/gitlab';
 import { encodeProjectPath, normalizeUrl } from '@/lib/utils';
 
@@ -308,4 +309,74 @@ export async function fetchMrDiscussions(
     host,
     `/projects/${projectId}/merge_requests/${mrIid}/discussions`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// File Activity — recently-merged MRs for cross-MR awareness.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch recently-merged MRs for a project, ordered by most recently updated.
+ * Uses a lightweight response shape — we only need iid, title, author, dates.
+ *
+ * @param targetBranch - Filter to MRs targeting this branch (usually main/master).
+ *   Null fetches all merged MRs regardless of target branch.
+ * @param updatedAfter - ISO 8601 date string. Only MRs updated after this date.
+ * @param maxResults - Cap the number of MRs returned (default 20).
+ */
+export async function fetchRecentMergedMrs(
+  host: GitLabHostConfig,
+  projectId: number,
+  targetBranch: string | null,
+  updatedAfter: string,
+  maxResults = 20,
+): Promise<Result<GitLabMergedMrSummary[]>> {
+  const params: Record<string, string | number | boolean | undefined> = {
+    state: 'merged',
+    order_by: 'updated_at',
+    sort: 'desc',
+    updated_after: updatedAfter,
+    per_page: Math.min(maxResults, 100),
+  };
+  if (targetBranch) {
+    params.target_branch = targetBranch;
+  }
+
+  // Single page is enough — we cap at maxResults and the API returns
+  // most-recent-first. No need to paginate through hundreds of old MRs.
+  return gitlabFetch<GitLabMergedMrSummary[]>(
+    host,
+    `/projects/${projectId}/merge_requests`,
+    { params },
+  );
+}
+
+/**
+ * Fetch the list of changed file paths for a specific MR.
+ * Uses the /changes endpoint but discards diff content — we only need paths.
+ *
+ * This is the lightest way to get changed files from GitLab's API.
+ * The response includes full diffs which we ignore; there's no path-only endpoint.
+ */
+export async function fetchMrChangedPaths(
+  host: GitLabHostConfig,
+  projectId: number,
+  mrIid: number,
+): Promise<Result<string[]>> {
+  const result = await gitlabFetch<GitLabMrChanges>(
+    host,
+    `/projects/${projectId}/merge_requests/${mrIid}/changes`,
+    { params: { access_raw_diffs: false } },
+  );
+  if (!result.ok) return result;
+
+  const paths = new Set<string>();
+  for (const change of result.data.changes) {
+    paths.add(change.new_path);
+    // Include old_path for renames so we catch files that moved
+    if (change.renamed_file && change.old_path !== change.new_path) {
+      paths.add(change.old_path);
+    }
+  }
+  return { ok: true, data: Array.from(paths) };
 }
