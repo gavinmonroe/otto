@@ -26,6 +26,7 @@ import { ThemeProvider } from '@/components/ThemeContext';
 import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { startInlineCommentInjection } from '@/services/review/inline-injector';
 import { startRelatedFilesSidebar } from '@/services/review/sidebar-injector';
+import { startRiskInjection } from '@/services/review/risk-injector';
 import { startFollowUpButtonInjection } from '@/services/followup/followup-injector';
 import { ChatPill } from '@/components/chat/ChatPill';
 import { ChatPanel } from '@/components/chat/ChatPanel';
@@ -114,8 +115,11 @@ async function initDiffsFeatures(
   // Inject inline comments next to diff lines as reviews complete
   startInlineCommentInjection(isDarkMode, ctx.signal);
 
-  // Inject related files into GitLab's sidebar file tree
+  // Inject related files + review queue into GitLab's sidebar file tree
   startRelatedFilesSidebar(isDarkMode, ctx.signal);
+
+  // Inject risk dots into GitLab's native file tree rows
+  startRiskInjection(isDarkMode, ctx.signal);
 
   // Load cached review or auto-review if preference is enabled
   await loadOrAutoReview(mrContext);

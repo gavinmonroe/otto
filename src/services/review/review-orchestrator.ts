@@ -19,6 +19,7 @@ import { buildEnrichedContext, formatFileContext } from '../gitlab/context-enric
 import type { EnrichedContext } from '../gitlab/context-enrichment';
 import { extractTicketRefs, findProviderForKey } from '../ticket/ticket-parser';
 import { loadCachedTickets, saveCachedTicket } from '../ticket/ticket-cache';
+import { loadPreferences, formatPreferencesForPrompt, incrementReviewCount } from './reviewer-prefs';
 import { fetchJiraTicket } from '../ticket/jira-client';
 import { loadLatestCachedReview, computeFileDiffHash } from './review-cache';
 import { normalizeUrl } from '@/lib/utils';
@@ -321,6 +322,16 @@ async function runCodeReviewTask(
   const concurrency = 3;
   const allFiles = context.diffFiles.filter((f) => !f.isDeleted || f.diff.length > 0);
 
+  // Load reviewer preferences for this host
+  let reviewerPreferences: string | null = null;
+  try {
+    const prefs = await loadPreferences(context.hostUrl);
+    reviewerPreferences = formatPreferencesForPrompt(prefs, context.projectPath);
+    await incrementReviewCount(context.hostUrl);
+  } catch {
+    // Non-critical — proceed without preferences
+  }
+
   // Incremental review: check if we have a previous review with per-file hashes.
   // Files whose diff hasn't changed can reuse their cached FileReview.
   let filesToReview = allFiles;
@@ -407,6 +418,7 @@ async function runCodeReviewTask(
             repoContext,
             callerSnippets,
             ticketContext,
+            reviewerPreferences,
           },
           (delta) => send({
             type: 'STREAM_FILE_REVIEW_DELTA',

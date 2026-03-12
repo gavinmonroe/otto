@@ -19,6 +19,7 @@ import { ThemeProvider } from '@/components/ThemeContext';
 import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { useReviewStore } from '@/services/review/review-store';
 import { RelatedFilesSidebarPanel } from '@/components/review/RelatedFilesSidebarPanel';
+import { ReviewQueuePanel } from '@/components/review/ReviewQueuePanel';
 
 const SIDEBAR_ATTR = 'data-otto-related-sidebar';
 
@@ -44,9 +45,10 @@ export function startRelatedFilesSidebar(isDarkMode: boolean, signal?: AbortSign
   let injected = false;
 
   const unsubscribe = useReviewStore.subscribe((state) => {
-    if (state.relatedFiles.length === 0) return;
+    const hasContent = state.relatedFiles.length > 0 || state.fileReviews.length > 0;
+    if (!hasContent) return;
     if (injected) {
-      // Re-render with updated files
+      // Re-render with updated data
       renderSidebar(isDarkMode);
       return;
     }
@@ -68,7 +70,8 @@ export function startRelatedFilesSidebar(isDarkMode: boolean, signal?: AbortSign
     sidebarScanTimer = setTimeout(() => {
       sidebarScanTimer = null;
       const state = useReviewStore.getState();
-      if (state.relatedFiles.length === 0) return;
+      const hasContent = state.relatedFiles.length > 0 || state.fileReviews.length > 0;
+      if (!hasContent) return;
 
       const sidebarEl = findSidebar();
       if (sidebarEl) {
@@ -136,8 +139,13 @@ function renderSidebar(isDarkMode: boolean): void {
   sidebarRoot.render(
     createElement(ThemeProvider, {
       isDark: isDarkMode,
-      children: createElement(OttoErrorBoundary, { name: 'RelatedFiles' },
-        createElement(RelatedFilesSidebarPanel),
+      children: createElement('div', null,
+        createElement(OttoErrorBoundary, { name: 'ReviewQueue' },
+          createElement(ReviewQueuePanel),
+        ),
+        createElement(OttoErrorBoundary, { name: 'RelatedFiles' },
+          createElement(RelatedFilesSidebarPanel),
+        ),
       ),
     }),
   );

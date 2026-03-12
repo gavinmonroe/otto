@@ -28,6 +28,7 @@ import type {
 } from '@/types/review';
 import type { FollowUpAnalysis, FollowUpStatus } from '@/types/followup';
 import type { ReviewProgress, ReviewTask } from './review-types';
+import { recordSignal } from './reviewer-prefs';
 import { INITIAL_REVIEW_PROGRESS } from './review-types';
 import type { CachedReview } from './review-cache';
 
@@ -308,16 +309,35 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
   }),
 
   // Comment actions
-  updateCommentStatus: (commentId, status, editedBody) => set((state) => ({
-    fileReviews: state.fileReviews.map((fr) => ({
-      ...fr,
-      comments: fr.comments.map((c) =>
-        c.id === commentId
-          ? { ...c, status, editedBody: editedBody ?? c.editedBody }
-          : c,
-      ),
-    })),
-  })),
+  updateCommentStatus: (commentId, status, editedBody) => {
+    const state = get();
+
+    // Record signal for reviewer preferences learning.
+    // "edited" counts as accepted (reviewer cared enough to refine).
+    if (status === 'accepted' || status === 'dismissed' || status === 'edited') {
+      const comment = state.fileReviews
+        .flatMap((fr) => fr.comments)
+        .find((c) => c.id === commentId);
+      if (comment && state.mrContext?.hostUrl) {
+        recordSignal(state.mrContext.hostUrl, {
+          category: comment.category,
+          severity: comment.severity,
+          action: status === 'dismissed' ? 'dismissed' : 'accepted',
+        }).catch(() => {}); // Fire and forget — don't block UI
+      }
+    }
+
+    set({
+      fileReviews: state.fileReviews.map((fr) => ({
+        ...fr,
+        comments: fr.comments.map((c) =>
+          c.id === commentId
+            ? { ...c, status, editedBody: editedBody ?? c.editedBody }
+            : c,
+        ),
+      })),
+    });
+  },
 
   // Follow-up actions
   setFollowUp: (commentId, analysis) => set((state) => ({

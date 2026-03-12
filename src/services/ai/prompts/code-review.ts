@@ -60,6 +60,8 @@ export type CodeReviewInput = {
   callerSnippets: Array<{ filePath: string; snippet: string }> | null;
   /** Formatted ticket context from linked issues */
   ticketContext: string | null;
+  /** Reviewer preferences learned from past reviews + repo facts */
+  reviewerPreferences: string | null;
 };
 
 export function buildCodeReviewPrompt(input: CodeReviewInput, customSystemPrompt?: string): ChatMessage[] {
@@ -109,6 +111,12 @@ ${input.mrDescription}`;
 
 ## Linked Ticket(s)
 ${input.ticketContext}`;
+  }
+
+  if (input.reviewerPreferences) {
+    userContent += `
+
+${input.reviewerPreferences}`;
   }
 
   return [

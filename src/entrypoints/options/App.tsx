@@ -14,6 +14,7 @@ import { AiProviderForm } from '@/components/settings/AiProviderForm';
 import { CustomPromptsForm } from '@/components/settings/CustomPromptsForm';
 import { GitLabConnectionForm } from '@/components/settings/GitLabConnectionForm';
 import { JiraConnectionForm } from '@/components/settings/JiraConnectionForm';
+import { ReviewerPreferencesForm } from '@/components/settings/ReviewerPreferencesForm';
 import { OttoLogo } from '@/components/OttoLogo';
 
 function useIsDark(themePref: 'light' | 'dark' | 'auto'): boolean {
@@ -86,6 +87,7 @@ export function App() {
         <CustomPromptsForm settings={settings} onUpdate={updateAiConfig} />
         <GitLabConnectionForm settings={settings} onUpdate={updateSettings} />
         <JiraConnectionForm settings={settings} onUpdate={updateSettings} />
+        <ReviewerPreferencesForm settings={settings} />
 
         {/* Preferences */}
         <div style={{ ...sectionStyle, background: t.cardBg, borderColor: t.border }}>
