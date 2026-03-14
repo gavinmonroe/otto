@@ -108,17 +108,25 @@ async function initMrListCommandCenter(
   listInfo: MrListInfo,
 ): Promise<void> {
   const isDark = detectDarkMode();
+
+  // Show a loading indicator immediately so the user knows Otto is working.
+  // This appears before any async work (host resolution, preview fetching).
+  const loadingIndicator = mountLoadingIndicator(isDark);
+
   const hostResult = await sendMessage({
     type: 'RESOLVE_GITLAB_HOST',
     payload: { pageUrl: listInfo.hostUrl },
   });
-  if (!hostResult.ok || !hostResult.data) return;
+  if (!hostResult.ok || !hostResult.data) { loadingIndicator.remove(); return; }
   const host = hostResult.data;
+
+  loadingIndicator.update('Resolving project...');
+
   const projectResult = await sendMessage({
     type: 'FETCH_PROJECT',
     payload: { hostId: host.id, projectPath: listInfo.projectPath },
   });
-  if (!projectResult.ok) return;
+  if (!projectResult.ok) { loadingIndicator.remove(); return; }
   const projectId = projectResult.data.id;
   const mountContext: MountContext = {
     hostId: host.id,
@@ -128,11 +136,13 @@ async function initMrListCommandCenter(
     isDark,
     brandColor: isDark ? '#40C4F5' : '#0c93e7',
   };
+  loadingIndicator.update('Waiting for MR list...');
+
   // Wait for MR rows to appear — GitLab's Vue app may not have rendered them yet.
-  // Polls every 500ms for up to 15 seconds before giving up. Also watches for
-  // DOM mutations so we catch the rows as soon as they appear.
   const rows = await waitForMrRows(ctx.signal);
-  if (rows.length === 0) return;
+  if (rows.length === 0) { loadingIndicator.remove(); return; }
+
+  loadingIndicator.update(`Loading previews for ${rows.length} MRs...`);
   // Batch-fetch preview data for all visible MRs
   const mrIids = rows.map((r) => r.mrIid);
   const batchResult = await sendMessage({
@@ -198,6 +208,10 @@ async function initMrListCommandCenter(
   }
   // Sort DOM rows
   sortAndReorderDom(rows);
+
+  // Remove loading indicator — toolbar replaces it
+  loadingIndicator.remove();
+
   // Mount toolbar
   mountToolbar(mountContext, ctx, rows.length);
   // Mount enhanced strips
@@ -353,19 +367,20 @@ async function initBasicPreviews(
   listInfo: MrListInfo,
 ): Promise<void> {
   const isDark = detectDarkMode();
+  const loadingIndicator = mountLoadingIndicator(isDark);
 
   const hostResult = await sendMessage({
     type: 'RESOLVE_GITLAB_HOST',
     payload: { pageUrl: listInfo.hostUrl },
   });
-  if (!hostResult.ok || !hostResult.data) return;
+  if (!hostResult.ok || !hostResult.data) { loadingIndicator.remove(); return; }
   const host = hostResult.data;
 
   const projectResult = await sendMessage({
     type: 'FETCH_PROJECT',
     payload: { hostId: host.id, projectPath: listInfo.projectPath },
   });
-  if (!projectResult.ok) return;
+  if (!projectResult.ok) { loadingIndicator.remove(); return; }
   const projectId = projectResult.data.id;
 
   const mountCtx: MountContext = {
@@ -377,7 +392,10 @@ async function initBasicPreviews(
     brandColor: isDark ? '#40C4F5' : '#0c93e7',
   };
 
+  loadingIndicator.update('Waiting for MR list...');
   const rows = await waitForMrRows(ctx.signal);
+  loadingIndicator.remove();
+
   for (const row of rows) {
     mountBasicStrip(row, mountCtx, ctx);
   }
@@ -1098,6 +1116,110 @@ function buildTaskListFromSettings(): ReviewTask[] {
   }
 
   return tasks;
+}
+
+// ---------------------------------------------------------------------------
+// Loading indicator — shown while Otto initializes on the MR list page
+// ---------------------------------------------------------------------------
+
+type LoadingIndicatorHandle = {
+  update: (message: string) => void;
+  remove: () => void;
+};
+
+function mountLoadingIndicator(isDark: boolean): LoadingIndicatorHandle {
+  const brandColor = '#40C4F5';
+  const bg = isDark ? '#161b22' : '#f6f8fa';
+  const border = isDark ? '#30363d' : '#d0d7de';
+  const text = isDark ? '#c9d1d9' : '#24292f';
+  const textMuted = isDark ? '#8b949e' : '#57606a';
+
+  const container = document.createElement('div');
+  container.setAttribute('data-otto-loading', 'true');
+
+  // Find the list container to insert before
+  const listContainer = document.querySelector('.issuable-list')
+    || document.querySelector('.mr-list')
+    || document.querySelector('[data-testid="issuable-list"]')
+    || document.querySelector('.content-list');
+
+  if (listContainer?.parentElement) {
+    listContainer.parentElement.insertBefore(container, listContainer);
+  } else {
+    document.body.appendChild(container);
+  }
+
+  const shadow = container.attachShadow({ mode: 'open' });
+  shadow.innerHTML = `
+    <style>
+      :host { display: block; }
+      @keyframes otto-load-pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.1); opacity: 0.85; }
+      }
+      .otto-loading-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: ${bg};
+        border-bottom: 1px solid ${border};
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .otto-loading-logo {
+        flex-shrink: 0;
+      }
+      .otto-loading-logo svg {
+        display: block;
+      }
+      .otto-loading-bolt {
+        transform-origin: center;
+        animation: otto-load-pulse 1.6s ease-in-out infinite;
+      }
+      .otto-loading-label {
+        font-weight: 600;
+        color: ${text};
+      }
+      .otto-loading-msg {
+        color: ${textMuted};
+      }
+      .otto-loading-dots::after {
+        content: '';
+        animation: otto-dots 1.5s steps(4, end) infinite;
+      }
+      @keyframes otto-dots {
+        0% { content: ''; }
+        25% { content: '.'; }
+        50% { content: '..'; }
+        75% { content: '...'; }
+      }
+    </style>
+    <div class="otto-loading-bar">
+      <div class="otto-loading-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 200 200">
+          <path d="m114.4 8.5h-3.61c-33.58 0-60.65 17.18-70.29 46.1-0.67 2.14 0.48 3.01 2.15 3.01h9.58c2.04 0 3.4-1.12 4.28-3.01 9.8-20.64 27.68-30.64 54.28-30.64h3.44c34.71 0 59.65 26.15 59.65 59.01 0 18.7-8.75 32.29-18.67 44.21-9.23 11.1-18.46 20.13-18.46 34.65v26.84c0 1.53 1.04 2.42 2.46 2.42h10.86c1.26 0 1.93-1.21 1.93-2.34v-28.05c0-8.79 7.84-15.71 15.85-25.28 11.09-13.11 21.64-27.95 21.64-52.29 0-39.99-30.64-74.63-75.09-74.63z" fill="${brandColor}"/>
+          <path d="m92.74 158.2h-30.02c-6.07 0-9.35-5.3-9.35-9.54v-12.78c0-1.33-1.08-2.04-2.21-2.04h-10.78c-1.34 0-2.17 1.12-2.17 2.16v12.75c0 12.13 10 24.66 24.1 24.66h15c1.34 0 2.01 0.88 2.01 2.01v13.06c0 1.24 0.96 2.22 2.09 2.22h11.17c1.13 0 1.88-1.05 1.88-2.1v-28.33c0-1.13-0.88-2.07-1.72-2.07z" fill="${brandColor}"/>
+          <path class="otto-loading-bolt" d="m119.9 57.61h-37.29c-1.51 0-2.31 1.23-2.31 2.45v11.18c0 1.48 1.05 2.37 2.31 2.37h14.53c1.42 0 1.67 1.23 1 2.45l-14.14 25.73c-0.88 1.69-0.21 3.03 1.46 3.03h12.68c1.17 0 1.83-1.05 2.59-2.46l21.86-38.23c1.67-3.11 0.17-5.82-2.69-6.52z" fill="${isDark ? '#c9d1d9' : '#24292f'}"/>
+          <path class="otto-loading-bolt" d="m51.41 104.8h-14.53c-1.42 0-2.17-1.21-1.25-3.03l14.14-24.71c1.14-2.04 0.47-3.47-1.36-3.47h-12.99c-1.59 0-2.55 0.7-3.21 2.12l-22.54 39.65c-1.04 2.34 0.61 4.89 3.05 4.89h38.69c1.42 0 1.96-1.22 1.96-2.35v-11.18c0-1.23-0.96-1.92-1.96-1.92z" fill="${isDark ? '#c9d1d9' : '#24292f'}"/>
+        </svg>
+      </div>
+      <span class="otto-loading-label">Otto</span>
+      <span class="otto-loading-msg" id="otto-load-msg">Initializing<span class="otto-loading-dots"></span></span>
+    </div>
+  `;
+
+  const msgEl = shadow.getElementById('otto-load-msg');
+
+  return {
+    update(message: string) {
+      if (msgEl) msgEl.innerHTML = `${message}<span class="otto-loading-dots"></span>`;
+    },
+    remove() {
+      container.remove();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

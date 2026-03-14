@@ -14,6 +14,7 @@ import { useSettings } from '@/hooks/use-settings';
 import { useTheme } from '@/components/ThemeContext';
 import { sendMessage } from '@/lib/messaging';
 import { OttoLogo } from '@/components/OttoLogo';
+import { OttoLogoAnimated } from '@/components/OttoLogoAnimated';
 import { Markdown } from '@/components/Markdown';
 import { RelatedFilesPanel } from './RelatedFilesPanel';
 import { EdgeCaseAnalysis } from './EdgeCaseAnalysis';
@@ -157,7 +158,7 @@ export function MrOverviewPanel() {
     return (
       <div style={s.panel}>
         <div style={s.header}>
-          <OttoLogo size={20} />
+          <OttoLogoAnimated size={20} />
           <span style={{ fontWeight: 600, fontSize: '14px' }}>Otto</span>
         </div>
       </div>
@@ -188,7 +189,7 @@ export function MrOverviewPanel() {
       {/* Header */}
       <div style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <OttoLogo size={20} />
+          {isComplete ? <OttoLogo size={20} /> : <OttoLogoAnimated size={20} />}
           <span style={{ fontWeight: 600, fontSize: '14px' }}>Otto</span>
           {review.mrContext && (
             <span style={{ fontSize: '12px', color: theme.textSecondary }}>

@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, AlertTriangle, AlertCircle, Lightbulb, Info, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, AlertTriangle, AlertCircle, Lightbulb, Info } from 'lucide-react';
 import { useReviewStore } from '@/services/review/review-store';
 import { useTheme } from '@/components/ThemeContext';
 import type { OttoTheme } from '@/components/ThemeContext';
@@ -19,6 +19,7 @@ import { Markdown } from '@/components/Markdown';
 import { SuggestionDiff } from '@/components/SuggestionDiff';
 import { ReviewActions } from './ReviewActions';
 import { OttoLogo } from '@/components/OttoLogo';
+import { OttoLogoAnimated } from '@/components/OttoLogoAnimated';
 import type { ReviewComment as ReviewCommentType, ReviewCommentStatus, FileActivity } from '@/types/review';
 
 type FileReviewFooterProps = {
@@ -56,9 +57,8 @@ export function FileReviewFooter({ filePath }: FileReviewFooterProps) {
       {isStreaming && (
         <>
           <div style={s.streamingRow}>
-            <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+            <OttoLogoAnimated size={14} />
             <span>Otto is reviewing this file...</span>
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
           {fileReviewDelta && (
             <div style={s.streamingBody}>

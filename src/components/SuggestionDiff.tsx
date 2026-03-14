@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
-import { highlightLines, extToLang } from '@/services/syntax/highlight-client';
+import { highlightLines, extToLang, resolveEffectiveLang } from '@/services/syntax/highlight-client';
 
 type SuggestionDiffProps = {
   originalCode: string;
@@ -36,12 +36,16 @@ export function SuggestionDiff({ originalCode, suggestion, filePath, startLine }
   );
 
   // Async syntax highlighting
+  // For multi-language files (Vue, Svelte), detect the sub-language from content
   const [highlightedHtml, setHighlightedHtml] = useState<string[] | null>(null);
-  const lang = filePath ? extToLang(filePath) : null;
+  const plainLines = useMemo(() => diffLines.map((l) => l.content), [diffLines]);
+  const lang = useMemo(
+    () => filePath ? resolveEffectiveLang(filePath, plainLines) : null,
+    [filePath, plainLines],
+  );
 
   useEffect(() => {
     let cancelled = false;
-    const plainLines = diffLines.map((l) => l.content);
 
     highlightLines(plainLines, lang, theme.isDark).then((html) => {
       if (!cancelled) setHighlightedHtml(html);

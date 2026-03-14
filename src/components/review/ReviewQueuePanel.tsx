@@ -118,26 +118,37 @@ function scrollToFile(filePath: string): void {
 function getFileIconColor(filePath: string, isDark: boolean): string {
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
   const colors: Record<string, [string, string]> = {
-    ts: ['#3178c6', '#3178c6'],
-    tsx: ['#3178c6', '#3178c6'],
-    js: ['#f7df1e', '#b8a200'],
-    jsx: ['#f7df1e', '#b8a200'],
-    py: ['#3776ab', '#5ba0d0'],
-    rb: ['#cc342d', '#e05050'],
-    go: ['#00add8', '#00add8'],
-    rs: ['#dea584', '#dea584'],
-    java: ['#b07219', '#e0943a'],
-    kt: ['#A97BFF', '#A97BFF'],
-    cs: ['#178600', '#68b723'],
-    css: ['#563d7c', '#a78bfa'],
-    scss: ['#c6538c', '#f472b6'],
-    html: ['#e34c26', '#f87171'],
-    vue: ['#41b883', '#41b883'],
-    json: ['#6b7280', '#9ca3af'],
-    yaml: ['#6b7280', '#9ca3af'],
-    yml: ['#6b7280', '#9ca3af'],
-    md: ['#6b7280', '#9ca3af'],
-    sql: ['#e38c00', '#fbbf24'],
+    // Web core
+    ts: ['#3178c6', '#3178c6'], tsx: ['#3178c6', '#3178c6'],
+    js: ['#f7df1e', '#b8a200'], jsx: ['#f7df1e', '#b8a200'],
+    html: ['#e34c26', '#f87171'], css: ['#563d7c', '#a78bfa'],
+    json: ['#6b7280', '#9ca3af'], yaml: ['#6b7280', '#9ca3af'], yml: ['#6b7280', '#9ca3af'],
+    // Frontend frameworks
+    vue: ['#41b883', '#41b883'], svelte: ['#ff3e00', '#ff6b3d'],
+    scss: ['#c6538c', '#f472b6'], sass: ['#c6538c', '#f472b6'], less: ['#1d365d', '#6b8ab8'],
+    // Backend / scripting
+    py: ['#3776ab', '#5ba0d0'], rb: ['#cc342d', '#e05050'],
+    go: ['#00add8', '#00add8'], rs: ['#dea584', '#dea584'],
+    java: ['#b07219', '#e0943a'], cs: ['#178600', '#68b723'],
+    php: ['#4f5d95', '#8892bf'], pl: ['#0298c3', '#39b5e0'],
+    lua: ['#000080', '#5b5bff'], r: ['#198ce7', '#4da6ff'],
+    ex: ['#6e4a7e', '#b07cc7'], exs: ['#6e4a7e', '#b07cc7'],
+    scala: ['#c22d40', '#e05565'], clj: ['#63b132', '#8fd460'],
+    hs: ['#5e5086', '#8b7fb8'], erl: ['#b83998', '#d06cb8'],
+    // Systems / native
+    c: ['#555555', '#a0a0a0'], h: ['#555555', '#a0a0a0'],
+    cpp: ['#f34b7d', '#f472b6'], cc: ['#f34b7d', '#f472b6'],
+    swift: ['#f05138', '#f47b6b'], kt: ['#A97BFF', '#A97BFF'],
+    dart: ['#00b4ab', '#40d4cc'], m: ['#438eff', '#6ba5ff'],
+    // Config / infra
+    sh: ['#89e051', '#89e051'], bash: ['#89e051', '#89e051'],
+    sql: ['#e38c00', '#fbbf24'], md: ['#6b7280', '#9ca3af'],
+    toml: ['#9c4221', '#c4724e'], xml: ['#0060ac', '#4da6ff'],
+    dockerfile: ['#384d54', '#6b8fa3'], graphql: ['#e10098', '#ff40b8'],
+    tf: ['#5c4ee5', '#8b7ff5'], hcl: ['#5c4ee5', '#8b7ff5'],
+    ps1: ['#012456', '#4070a0'],
+    // Data / misc
+    tex: ['#3d6117', '#6b9e3a'], diff: ['#e8d44d', '#f0e070'],
   };
   const pair = colors[ext];
   return pair ? (isDark ? pair[1] : pair[0]) : (isDark ? '#9ca3af' : '#6b7280');

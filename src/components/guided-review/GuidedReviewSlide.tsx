@@ -12,18 +12,20 @@
 // - Code suggestion diff (for comments with suggestions)
 // ---------------------------------------------------------------------------
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
 import { Markdown } from '@/components/Markdown';
 import { SuggestionDiff } from '@/components/SuggestionDiff';
+import { CollapsibleDiff } from '@/components/guided-review/CollapsibleDiff';
 import { ReviewActions } from '@/components/review/ReviewActions';
 import { useReviewStore } from '@/services/review/review-store';
 import type { ReviewSlide } from '@/types/guided-review';
-import type { ReviewCommentStatus, RelatedFile, FileReview } from '@/types/review';
+import type { ReviewCommentStatus, RelatedFile, FileReview, DiffFileData, FileActivityData } from '@/types/review';
 import type { GitLabNote } from '@/types/gitlab';
+import { highlightLines, resolveEffectiveLang } from '@/services/syntax/highlight-client';
 import {
   FileText, AlertTriangle, AlertCircle, Lightbulb, Info,
-  MessageSquare, GitBranch, Link2,
+  MessageSquare, GitBranch, Link2, Clock, ExternalLink, ChevronRight, ChevronDown, Code,
 } from 'lucide-react';
 
 type Props = {
@@ -36,12 +38,50 @@ export function GuidedReviewSlide({ slide, onUpdateCommentStatus }: Props) {
 
   // Get the set of file paths changed in this MR — used to mark related files
   // that are also part of the diff (important context for the reviewer).
-  // Select the raw array (stable reference from Zustand) and derive the Set in useMemo.
   const fileReviews = useReviewStore((st) => st.fileReviews);
   const changedPaths = useMemo(
     () => new Set(fileReviews.map((fr) => fr.filePath)),
     [fileReviews],
   );
+
+  // Get raw diff data for this slide's file — used to show the actual diff
+  const diffFiles = useReviewStore((st) => st.mrContext?.diffFiles ?? []);
+  const slideFilePath = getSlideFilePath(slide);
+  const fileDiff = useMemo(
+    () => diffFiles.find((f) => f.filePath === slideFilePath),
+    [diffFiles, slideFilePath],
+  );
+
+  // Get file activity data — recent MRs that touched this file
+  const fileActivity = useReviewStore((st) => st.fileActivity);
+  const fileActivityForSlide = useMemo(() => {
+    if (!fileActivity || !slideFilePath) return null;
+    return fileActivity.fileActivities.find((a) => a.filePath === slideFilePath) ?? null;
+  }, [fileActivity, slideFilePath]);
+
+  // Get diff data for related files that are also changed in this MR
+  const relatedDiffs = useMemo(() => {
+    const map = new Map<string, DiffFileData>();
+    for (const rf of slide.relatedFiles) {
+      const d = diffFiles.find((f) => f.filePath === rf.filePath);
+      if (d) map.set(rf.filePath, d);
+    }
+    return map;
+  }, [slide.relatedFiles, diffFiles]);
+
+  // Compute highlight range for the current slide
+  const highlightRange = useMemo(() => {
+    if (slide.kind === 'comment' && slide.comment.startLine) {
+      return { start: slide.comment.startLine, end: slide.comment.endLine ?? slide.comment.startLine };
+    }
+    if (slide.kind === 'edgeCase' && slide.edgeCase.lineRange) {
+      return slide.edgeCase.lineRange;
+    }
+    if (slide.kind === 'thread' && slide.lineRange) {
+      return slide.lineRange;
+    }
+    return null;
+  }, [slide]);
 
   return (
     <div style={{
@@ -77,9 +117,29 @@ export function GuidedReviewSlide({ slide, onUpdateCommentStatus }: Props) {
         <ThreadSlideContent slide={slide} theme={theme} />
       )}
 
-      {/* Related files */}
+      {/* File diff — shows the actual diff for this file with the relevant lines highlighted */}
+      {fileDiff && fileDiff.diff && (
+        <CollapsibleDiff
+          diff={fileDiff.diff}
+          filePath={fileDiff.filePath}
+          highlightRange={highlightRange}
+          label={`Diff: ${fileDiff.filePath.split('/').pop()}`}
+        />
+      )}
+
+      {/* File activity — recent MRs that touched this file */}
+      {fileActivityForSlide && fileActivityForSlide.recentMrs.length > 0 && (
+        <FileActivitySection activity={fileActivityForSlide} theme={theme} />
+      )}
+
+      {/* Related files — with collapsible diffs for files also changed in this MR */}
       {slide.relatedFiles.length > 0 && (
-        <RelatedFilesSection files={slide.relatedFiles} changedPaths={changedPaths} theme={theme} />
+        <RelatedFilesSection
+          files={slide.relatedFiles}
+          changedPaths={changedPaths}
+          relatedDiffs={relatedDiffs}
+          theme={theme}
+        />
       )}
     </div>
   );
@@ -469,7 +529,13 @@ function NoteCard({ note, theme }: { note: GitLabNote; theme: OttoTheme }) {
 // Related files section
 // ---------------------------------------------------------------------------
 
-function RelatedFilesSection({ files, changedPaths, theme }: { files: RelatedFile[]; changedPaths: Set<string>; theme: OttoTheme }) {
+function RelatedFilesSection({ files, changedPaths, relatedDiffs, theme }: { files: RelatedFile[]; changedPaths: Set<string>; relatedDiffs: Map<string, DiffFileData>; theme: OttoTheme }) {
+  // Get MR context for building GitLab blob URLs
+  const mrContext = useReviewStore((st) => st.mrContext);
+  const hostUrl = mrContext?.hostUrl;
+  const projectPath = mrContext?.projectPath;
+  const branch = mrContext?.sourceBranch;
+
   return (
     <div style={{
       padding: '8px 12px',
@@ -491,37 +557,293 @@ function RelatedFilesSection({ files, changedPaths, theme }: { files: RelatedFil
         <Link2 size={11} />
         Related Files
       </div>
-      {files.map((rf) => {
-        const isAlsoChanged = changedPaths.has(rf.filePath);
-        return (
-          <div key={rf.filePath} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '3px 0',
-          }}>
-            <RelationshipBadge relationship={rf.relationship} theme={theme} />
-            {isAlsoChanged && (
-              <span title="Also changed in this MR" style={{ display: 'inline-flex', flexShrink: 0 }}>
-                <GitBranch size={11} style={{ color: theme.warning }} />
-              </span>
-            )}
-            <span style={{
+      {files.map((rf) => (
+        <RelatedFileRow
+          key={rf.filePath}
+          file={rf}
+          isAlsoChanged={changedPaths.has(rf.filePath)}
+          diff={relatedDiffs.get(rf.filePath) ?? null}
+          hostUrl={hostUrl}
+          projectPath={projectPath}
+          branch={branch}
+          theme={theme}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Individual related file row — clickable link + collapsible content preview + diff.
+ */
+function RelatedFileRow({
+  file,
+  isAlsoChanged,
+  diff,
+  hostUrl,
+  projectPath,
+  branch,
+  theme,
+}: {
+  file: RelatedFile;
+  isAlsoChanged: boolean;
+  diff: DiffFileData | null;
+  hostUrl?: string;
+  projectPath?: string;
+  branch?: string;
+  theme: OttoTheme;
+}) {
+  const [showContent, setShowContent] = useState(false);
+  const [highlightedHtml, setHighlightedHtml] = useState<string[] | null>(null);
+
+  const fileName = file.filePath.split('/').pop() ?? file.filePath;
+  const blobUrl = hostUrl && projectPath && branch
+    ? `${hostUrl}/${projectPath}/-/blob/${branch}/${file.filePath}`
+    : null;
+
+  // Highlight content when expanded
+  const contentLines = file.content?.split('\n') ?? [];
+  const truncatedLines = contentLines.slice(0, 80);
+  const isTruncated = contentLines.length > 80;
+
+  const lang = resolveEffectiveLang(file.filePath, truncatedLines);
+
+  // Lazy highlight on expand
+  if (showContent && !highlightedHtml && file.content) {
+    highlightLines(truncatedLines, lang, theme.isDark).then((html) => {
+      setHighlightedHtml(html);
+    });
+  }
+
+  return (
+    <div style={{ marginBottom: '4px' }}>
+      {/* File row */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '3px 0',
+      }}>
+        <RelationshipBadge relationship={file.relationship} theme={theme} />
+        {isAlsoChanged && (
+          <span title="Also changed in this MR" style={{ display: 'inline-flex', flexShrink: 0 }}>
+            <GitBranch size={11} style={{ color: theme.warning }} />
+          </span>
+        )}
+
+        {/* Clickable file name — opens in new tab */}
+        {blobUrl ? (
+          <a
+            href={blobUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open ${file.filePath} in GitLab`}
+            style={{
               fontSize: '12px',
               fontFamily: 'monospace',
               color: isAlsoChanged ? theme.warning : theme.brand,
-            }}>
-              {rf.filePath.split('/').pop()}
-            </span>
-            <span style={{
-              fontSize: '11px',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            {fileName}
+            <ExternalLink size={9} style={{ opacity: 0.6 }} />
+          </a>
+        ) : (
+          <span style={{
+            fontSize: '12px',
+            fontFamily: 'monospace',
+            color: isAlsoChanged ? theme.warning : theme.brand,
+          }}>
+            {fileName}
+          </span>
+        )}
+
+        <span style={{
+          fontSize: '11px',
+          color: theme.textMuted,
+          flex: 1,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          {isAlsoChanged ? 'also changed in this MR' : file.reason}
+        </span>
+
+        {/* Preview toggle — only if content is available */}
+        {file.content && (
+          <button
+            onClick={() => setShowContent(!showContent)}
+            title={showContent ? 'Hide preview' : 'Preview file content'}
+            aria-expanded={showContent}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px',
+              padding: '1px 5px',
+              borderRadius: '3px',
+              border: `1px solid ${theme.borderSubtle}`,
+              background: showContent ? theme.bgMuted : 'transparent',
               color: theme.textMuted,
-              flex: 1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>
-              {isAlsoChanged ? 'also changed in this MR' : rf.reason}
+              fontSize: '10px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              flexShrink: 0,
+            }}
+          >
+            <Code size={9} />
+            {showContent ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
+          </button>
+        )}
+      </div>
+
+      {/* Collapsible content preview */}
+      {showContent && file.content && (
+        <div style={{
+          marginTop: '4px',
+          marginLeft: '8px',
+          borderRadius: '6px',
+          border: `1px solid ${theme.borderSubtle}`,
+          overflow: 'hidden',
+          maxHeight: '300px',
+          overflowY: 'auto',
+        }}>
+          <div style={{
+            padding: '4px 8px',
+            fontSize: '10px',
+            fontWeight: 600,
+            color: theme.textMuted,
+            background: theme.bgSubtle,
+            borderBottom: `1px solid ${theme.borderSubtle}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span>{file.filePath}</span>
+            <span>{contentLines.length} lines</span>
+          </div>
+          <div style={{ fontSize: '11px', fontFamily: 'monospace', lineHeight: '18px' }}>
+            {truncatedLines.map((line, i) => (
+              <div key={i} style={{
+                display: 'flex',
+                minHeight: '18px',
+                padding: '0 4px',
+              }}>
+                <span style={{
+                  display: 'inline-block',
+                  width: '32px',
+                  textAlign: 'right',
+                  paddingRight: '8px',
+                  color: theme.textMuted,
+                  fontSize: '10px',
+                  opacity: 0.5,
+                  userSelect: 'none',
+                  flexShrink: 0,
+                }}>
+                  {i + 1}
+                </span>
+                {highlightedHtml ? (
+                  <span
+                    style={{ whiteSpace: 'pre', tabSize: 4, flex: 1, minWidth: 0 }}
+                    dangerouslySetInnerHTML={{ __html: highlightedHtml[i] }}
+                  />
+                ) : (
+                  <span style={{ whiteSpace: 'pre', tabSize: 4, flex: 1, minWidth: 0, color: theme.text }}>
+                    {line}
+                  </span>
+                )}
+              </div>
+            ))}
+            {isTruncated && (
+              <div style={{
+                padding: '4px 8px',
+                fontSize: '10px',
+                color: theme.textMuted,
+                fontStyle: 'italic',
+                borderTop: `1px solid ${theme.borderSubtle}`,
+                background: theme.bgSubtle,
+              }}>
+                ... {contentLines.length - 80} more lines (open in GitLab to see full file)
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Collapsible diff for related files also changed in this MR */}
+      {diff && diff.diff && (
+        <div style={{ marginTop: '4px', marginLeft: '8px' }}>
+          <CollapsibleDiff
+            diff={diff.diff}
+            filePath={diff.filePath}
+            label={`Diff: ${fileName}`}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// File activity section — recent MRs that touched this file
+// ---------------------------------------------------------------------------
+
+function FileActivitySection({
+  activity,
+  theme,
+}: {
+  activity: { filePath: string; recentMrs: Array<{ iid: number; title: string; author: string; mergedAt: string; webUrl: string }> };
+  theme: OttoTheme;
+}) {
+  return (
+    <div style={{
+      padding: '8px 12px',
+      background: theme.bgSubtle,
+      borderRadius: '6px',
+      border: `1px solid ${theme.borderSubtle}`,
+      borderLeft: `3px solid ${theme.warning}`,
+    }}>
+      <div style={{
+        fontSize: '11px',
+        fontWeight: 600,
+        color: theme.textMuted,
+        marginBottom: '6px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+      }}>
+        <Clock size={11} />
+        Recent Activity ({activity.recentMrs.length} recent MR{activity.recentMrs.length !== 1 ? 's' : ''})
+      </div>
+      {activity.recentMrs.map((mr) => {
+        const daysAgo = Math.round(
+          (Date.now() - new Date(mr.mergedAt).getTime()) / (24 * 60 * 60 * 1000),
+        );
+        return (
+          <div key={mr.iid} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '2px 0',
+            fontSize: '12px',
+          }}>
+            <a
+              href={mr.webUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: theme.brand, textDecoration: 'none', fontWeight: 600, flexShrink: 0 }}
+            >
+              !{mr.iid}
+            </a>
+            <span style={{ color: theme.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              {mr.title}
+            </span>
+            <span style={{ color: theme.textMuted, fontSize: '11px', flexShrink: 0 }}>
+              @{mr.author} · {daysAgo}d ago
             </span>
           </div>
         );
@@ -529,6 +851,10 @@ function RelatedFilesSection({ files, changedPaths, theme }: { files: RelatedFil
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Relationship badge
+// ---------------------------------------------------------------------------
 
 function RelationshipBadge({ relationship, theme }: { relationship: string; theme: OttoTheme }) {
   const labels: Record<string, string> = {

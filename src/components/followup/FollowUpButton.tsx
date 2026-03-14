@@ -16,6 +16,7 @@
 import { useCallback } from 'react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
 import { OttoLogo } from '@/components/OttoLogo';
+import { OttoLogoAnimated } from '@/components/OttoLogoAnimated';
 import { useReviewStore } from '@/services/review/review-store';
 import { sendMessage } from '@/lib/messaging';
 import { parseCommentThread, computeThreadHash } from '@/services/gitlab/comment-parser';
@@ -109,7 +110,7 @@ export function FollowUpButton({ noteElement, onTogglePanel }: FollowUpButtonPro
       aria-label="Otto follow-up"
     >
       {status === 'loading' ? (
-        <span style={s.spinner} />
+        <OttoLogoAnimated size={14} />
       ) : (
         <OttoLogo size={14} />
       )}

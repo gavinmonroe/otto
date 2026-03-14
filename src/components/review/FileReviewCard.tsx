@@ -9,6 +9,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useReviewStore } from '@/services/review/review-store';
 import { openStream } from '@/lib/messaging';
 import { OttoLogo } from '@/components/OttoLogo';
+import { OttoLogoAnimated } from '@/components/OttoLogoAnimated';
 import { useTheme } from '@/components/ThemeContext';
 import type { StreamChunk } from '@/types/messages';
 
@@ -77,7 +78,7 @@ export function FileReviewCard({ filePath }: FileReviewCardProps) {
     if (singleFileLoading || isStreaming) {
       return (
         <>
-          <span className="otto-spinner" />
+          <OttoLogoAnimated size={14} />
           <span>Reviewing...</span>
         </>
       );
