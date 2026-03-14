@@ -21,6 +21,7 @@ export type OttoTheme = {
   bg: string;
   bgSubtle: string;
   bgMuted: string;
+  bgInset: string;
   // Text
   text: string;
   textSecondary: string;
@@ -37,7 +38,11 @@ export type OttoTheme = {
   errorBg: string;
   errorBorder: string;
   success: string;
+  successBg: string;
   warning: string;
+  warningBg: string;
+  info: string;
+  infoBg: string;
   // Interactive
   btnPrimaryBg: string;
   btnPrimaryText: string;
@@ -51,6 +56,7 @@ const LIGHT_THEME: OttoTheme = {
   bg: '#ffffff',
   bgSubtle: '#f9fafb',
   bgMuted: '#f3f4f6',
+  bgInset: '#f8fafc',
   text: '#1f2937',
   textSecondary: '#6b7280',
   textMuted: '#9ca3af',
@@ -63,7 +69,11 @@ const LIGHT_THEME: OttoTheme = {
   errorBg: '#fef2f2',
   errorBorder: '#fecaca',
   success: '#16a34a',
+  successBg: '#f0fdf4',
   warning: '#d97706',
+  warningBg: '#fffbeb',
+  info: '#2563eb',
+  infoBg: '#eff6ff',
   btnPrimaryBg: '#0c93e7',
   btnPrimaryText: '#ffffff',
   btnSecondaryBg: '#f3f4f6',
@@ -76,6 +86,7 @@ const DARK_THEME: OttoTheme = {
   bg: '#1f2937',
   bgSubtle: '#111827',
   bgMuted: '#374151',
+  bgInset: '#1e293b',
   text: '#e5e7eb',
   textSecondary: '#9ca3af',
   textMuted: '#6b7280',
@@ -88,7 +99,11 @@ const DARK_THEME: OttoTheme = {
   errorBg: '#450a0a',
   errorBorder: '#7f1d1d',
   success: '#4ade80',
+  successBg: '#064e3b',
   warning: '#fbbf24',
+  warningBg: '#451a03',
+  info: '#93c5fd',
+  infoBg: '#1e3a5f',
   btnPrimaryBg: '#0c93e7',
   btnPrimaryText: '#ffffff',
   btnSecondaryBg: '#374151',

@@ -26,6 +26,13 @@ import type {
   AcValidationData,
 } from './review';
 import type {
+  AdversarialTestData,
+  ContractData,
+  BehavioralDeltaData,
+  TrustAssessment,
+  CiExecutionResult,
+} from './verification';
+import type {
   GitLabMergeRequest,
   GitLabProject,
   GitLabTreeItem,
@@ -35,6 +42,9 @@ import type { FollowUpAnalysis, ThreadContext } from './followup';
 import type { ChatMessage, SuggestedQuestion } from './chat';
 import type { TicketInfo } from './ticket';
 import type { TicketProvider } from './ticket';
+import type { MrPreviewData } from './mr-preview';
+import type { QueuedReview, QueueStatus } from './review-queue';
+import type { ReviewTask } from '@/services/review/review-types';
 
 // ---------------------------------------------------------------------------
 // Result type — used for all responses that can fail.
@@ -150,6 +160,64 @@ export type TestJiraConnectionMessage = {
   payload: { provider: TicketProvider };
 };
 
+export type FetchMrPreviewMessage = {
+  type: 'FETCH_MR_PREVIEW';
+  payload: { hostId: string; projectId: number; projectPath: string; mrIid: number };
+};
+
+// ---------------------------------------------------------------------------
+// Queue messages — MR list command center operations
+// ---------------------------------------------------------------------------
+
+export type EnqueueReviewMessage = {
+  type: 'ENQUEUE_REVIEW';
+  payload: {
+    mrIid: number;
+    projectPath: string;
+    projectId: number;
+    hostUrl: string;
+    hostId: string;
+    title: string;
+    authorUsername: string;
+    sourceBranch: string;
+    targetBranch: string;
+    labels: string[];
+    mrState: 'opened' | 'closed' | 'merged' | 'locked';
+    filesChanged: number;
+    linesAdded: number;
+    linesRemoved: number;
+    riskLevel?: 'low' | 'medium' | 'high';
+    createdAt?: string;
+    updatedAt?: string;
+    tasks: ReviewTask[];
+  };
+};
+
+export type PauseReviewMessage = {
+  type: 'PAUSE_REVIEW';
+  payload: { projectPath: string; mrIid: number };
+};
+
+export type ResumeReviewMessage = {
+  type: 'RESUME_REVIEW';
+  payload: { projectPath: string; mrIid: number };
+};
+
+export type CancelReviewMessage = {
+  type: 'CANCEL_REVIEW';
+  payload: { projectPath: string; mrIid: number };
+};
+
+export type GetQueueStatusMessage = {
+  type: 'GET_QUEUE_STATUS';
+  payload: { projectPath: string };
+};
+
+export type FetchMrPreviewsBatchMessage = {
+  type: 'FETCH_MR_PREVIEWS_BATCH';
+  payload: { hostId: string; projectId: number; projectPath: string; mrIids: number[] };
+};
+
 export type RequestMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
@@ -169,7 +237,14 @@ export type RequestMessage =
   | FetchMrDiscussionsMessage
   | FetchTicketMessage
   | FetchTicketBatchMessage
-  | TestJiraConnectionMessage;
+  | TestJiraConnectionMessage
+  | FetchMrPreviewMessage
+  | EnqueueReviewMessage
+  | PauseReviewMessage
+  | ResumeReviewMessage
+  | CancelReviewMessage
+  | GetQueueStatusMessage
+  | FetchMrPreviewsBatchMessage;
 
 // ---------------------------------------------------------------------------
 // Response map — maps each request type to its response type.
@@ -195,6 +270,13 @@ export type MessageResponseMap = {
   FETCH_TICKET: Result<TicketInfo>;
   FETCH_TICKET_BATCH: Result<Record<string, TicketInfo>>;
   TEST_JIRA_CONNECTION: Result<{ displayName: string }>;
+  FETCH_MR_PREVIEW: Result<MrPreviewData>;
+  ENQUEUE_REVIEW: Result<QueuedReview>;
+  PAUSE_REVIEW: Result<boolean>;
+  RESUME_REVIEW: Result<boolean>;
+  CANCEL_REVIEW: Result<boolean>;
+  GET_QUEUE_STATUS: Result<QueueStatus>;
+  FETCH_MR_PREVIEWS_BATCH: Result<Record<number, MrPreviewData>>;
 };
 
 // ---------------------------------------------------------------------------
@@ -210,7 +292,7 @@ export type StreamRequest =
     type: 'STREAM_REVIEW';
     payload: {
       mrContext: MrContext;
-      tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'>;
+      tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'adversarialTests' | 'contracts' | 'behavioralDelta'>;
     };
   }
   | {
@@ -251,4 +333,15 @@ export type StreamChunk =
   | { type: 'STREAM_ALL_COMPLETE' }
   | { type: 'STREAM_CHAT_DELTA'; payload: { content: string } }
   | { type: 'STREAM_CHAT_COMPLETE'; payload: { content: string; suggestedQuestions: SuggestedQuestion[] } }
-  | { type: 'STREAM_CHAT_ERROR'; payload: { error: string } };
+  | { type: 'STREAM_CHAT_ERROR'; payload: { error: string } }
+  // Verification stream chunks
+  | { type: 'STREAM_ADVERSARIAL_TESTS_DELTA'; payload: { content: string } }
+  | { type: 'STREAM_ADVERSARIAL_TESTS_COMPLETE'; payload: { data: AdversarialTestData } }
+  | { type: 'STREAM_CONTRACTS_DELTA'; payload: { content: string } }
+  | { type: 'STREAM_CONTRACTS_COMPLETE'; payload: { data: ContractData } }
+  | { type: 'STREAM_BEHAVIORAL_DELTA_DELTA'; payload: { content: string } }
+  | { type: 'STREAM_BEHAVIORAL_DELTA_COMPLETE'; payload: { data: BehavioralDeltaData } }
+  | { type: 'STREAM_TRUST_COMPLETE'; payload: { trust: TrustAssessment } }
+  | { type: 'STREAM_CI_EXECUTION_COMPLETE'; payload: { result: CiExecutionResult } }
+  // Queue stream chunks
+  | { type: 'STREAM_REVIEW_PAUSED'; payload: { reason: string } };

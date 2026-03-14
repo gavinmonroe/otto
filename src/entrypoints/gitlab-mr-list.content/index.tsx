@@ -1,0 +1,1074 @@
+
+// ---------------------------------------------------------------------------
+// Content Script Entry — GitLab MR List Page (Command Center)
+//
+// Injects enhanced preview strips, ticket group headers, toolbar, and
+// queue status bar into GitLab's merge requests listing page.
+// ---------------------------------------------------------------------------
+import { createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { sendMessage } from '@/lib/messaging';
+import { onSettingsChange, loadSettings } from '@/lib/storage';
+import { ThemeProvider } from '@/components/ThemeContext';
+import { MrPreviewStrip } from '@/components/mr-list/MrPreviewStrip';
+import { MrEnhancedStrip } from '@/components/mr-list/MrEnhancedStrip';
+import { TicketGroupHeader } from '@/components/mr-list/TicketGroupHeader';
+import { MrListToolbar } from '@/components/mr-list/MrListToolbar';
+import { QueueStatusBar } from '@/components/mr-list/QueueStatusBar';
+import { computePriority } from '@/services/review-queue/priority-scorer';
+import { groupMrsByTicket, enrichGroups } from '@/services/review-queue/ticket-grouper';
+import type { MrPreviewData } from '@/types/mr-preview';
+import type {
+  QueuedReview,
+  QueueStatus,
+  QueueSortKey,
+  TicketGroup,
+  ReviewPriority,
+} from '@/types/review-queue';
+import type { ReviewTask } from '@/services/review/review-types';
+export default defineContentScript({
+  matches: ['*://*/*'],
+  runAt: 'document_idle',
+  async main(ctx) {
+    const listInfo = parseMrListUrl(window.location.href);
+    if (!listInfo) return;
+    const settings = await loadSettings();
+    if (settings.preferences.enabledFeatures?.mrListPreview === false) {
+      listenForSettingsToggle(ctx, listInfo);
+      return;
+    }
+
+    // Cache enabled features for building task lists when enqueuing
+    cachedEnabledFeatures = settings.preferences.enabledFeatures ?? null;
+
+    // If queue feature is enabled, run the full command center.
+    // Otherwise, fall back to basic preview strips only.
+    if (settings.preferences.enabledFeatures?.mrReviewQueue !== false) {
+      await initMrListCommandCenter(ctx, listInfo);
+    } else {
+      await initBasicPreviews(ctx, listInfo);
+    }
+  },
+});
+// ---------------------------------------------------------------------------
+// URL parsing
+// ---------------------------------------------------------------------------
+type MrListInfo = {
+  hostUrl: string;
+  projectPath: string;
+};
+function parseMrListUrl(url: string): MrListInfo | null {
+  try {
+    const u = new URL(url);
+    const match = u.pathname.match(/^\/(.+)\/-\/merge_requests\/?$/);
+    if (!match) return null;
+    return { hostUrl: u.origin, projectPath: match[1] };
+  } catch {
+    return null;
+  }
+}
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+type MountedComponent = {
+  container: HTMLElement;
+  root: ReturnType<typeof createRoot>;
+};
+const mountedStrips = new Map<number, MountedComponent>();
+const mountedGroupHeaders = new Map<string, MountedComponent>();
+let mountedToolbar: MountedComponent | null = null;
+let mountedStatusBar: MountedComponent | null = null;
+const previewCache = new Map<number, MrPreviewData>();
+const priorityCache = new Map<number, ReviewPriority>();
+let currentQueueStatus: QueueStatus | null = null;
+let currentSortKey: QueueSortKey = 'priority';
+let currentGroups: TicketGroup[] = [];
+let currentUngrouped: number[] = [];
+let queuePort: chrome.runtime.Port | null = null;
+/** Guard to prevent MutationObserver from firing during our own DOM manipulation */
+let suppressObserver = false;
+/** Toolbar re-render function — set by mountToolbar, called by queue status updates */
+let rerenderToolbar: (() => void) | null = null;
+/** Cached settings for building task lists */
+let cachedEnabledFeatures: Record<string, boolean> | null = null;
+
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
+type MountContext = {
+  hostId: string;
+  projectId: number;
+  projectPath: string;
+  hostUrl: string;
+  isDark: boolean;
+  brandColor: string;
+};
+async function initMrListCommandCenter(
+  ctx: typeof ContentScriptContext.prototype,
+  listInfo: MrListInfo,
+): Promise<void> {
+  const isDark = detectDarkMode();
+  const hostResult = await sendMessage({
+    type: 'RESOLVE_GITLAB_HOST',
+    payload: { pageUrl: listInfo.hostUrl },
+  });
+  if (!hostResult.ok || !hostResult.data) return;
+  const host = hostResult.data;
+  const projectResult = await sendMessage({
+    type: 'FETCH_PROJECT',
+    payload: { hostId: host.id, projectPath: listInfo.projectPath },
+  });
+  if (!projectResult.ok) return;
+  const projectId = projectResult.data.id;
+  const mountContext: MountContext = {
+    hostId: host.id,
+    projectId,
+    projectPath: listInfo.projectPath,
+    hostUrl: listInfo.hostUrl,
+    isDark,
+    brandColor: isDark ? '#40C4F5' : '#0c93e7',
+  };
+  // Find all MR rows
+  const rows = findMrRows();
+  if (rows.length === 0) return;
+  // Batch-fetch preview data for all visible MRs
+  const mrIids = rows.map((r) => r.mrIid);
+  const batchResult = await sendMessage({
+    type: 'FETCH_MR_PREVIEWS_BATCH',
+    payload: {
+      hostId: host.id,
+      projectId,
+      projectPath: listInfo.projectPath,
+      mrIids,
+    },
+  });
+  if (batchResult.ok) {
+    for (const [iidStr, preview] of Object.entries(batchResult.data)) {
+      const iid = Number(iidStr);
+      previewCache.set(iid, preview);
+    }
+  }
+  // Compute priorities for all MRs
+  for (const row of rows) {
+    const preview = previewCache.get(row.mrIid);
+    const mrMeta = extractMrMetaFromDom(row.element);
+    const priority = computePriority({
+      filesChanged: preview?.filesChanged,
+      linesAdded: preview?.linesAdded,
+      linesRemoved: preview?.linesRemoved,
+      riskLevel: preview?.riskLevel,
+      labels: mrMeta.labels,
+      createdAt: mrMeta.createdAt,
+      mrState: preview?.state as 'opened' | 'closed' | 'merged' | 'locked' | undefined,
+    });
+    priorityCache.set(row.mrIid, priority);
+  }
+  // Group by ticket
+  const groupableMrs = rows.map((r) => {
+    const meta = extractMrMetaFromDom(r.element);
+    return {
+      mrIid: r.mrIid,
+      title: meta.title,
+      sourceBranch: meta.sourceBranch,
+      priorityScore: priorityCache.get(r.mrIid)?.score ?? 0,
+    };
+  });
+  const groupResult = groupMrsByTicket(groupableMrs);
+  currentGroups = groupResult.groups;
+  currentUngrouped = groupResult.ungroupedIids;
+
+  // Fetch ticket details if Jira is configured
+  const ticketKeys = currentGroups.map((g) => g.ticketKey);
+  if (ticketKeys.length > 0) {
+    sendMessage({
+      type: 'FETCH_TICKET_BATCH',
+      payload: { ticketKeys },
+    }).then((result) => {
+      if (result.ok) {
+        const enriched: Record<string, { title?: string; status?: string }> = {};
+        for (const [key, info] of Object.entries(result.data)) {
+          enriched[key] = { title: info.title, status: info.status };
+        }
+        currentGroups = enrichGroups(currentGroups, enriched);
+        renderGroupHeaders(rows, mountContext, ctx);
+      }
+    });
+  }
+  // Sort DOM rows
+  sortAndReorderDom(rows);
+  // Mount toolbar
+  mountToolbar(mountContext, ctx, rows.length);
+  // Mount enhanced strips
+  for (const row of rows) {
+    mountEnhancedStrip(row, mountContext, ctx);
+  }
+  // Mount group headers
+  renderGroupHeaders(rows, mountContext, ctx);
+  // Connect queue port for real-time updates
+  connectQueuePort(mountContext, rows, ctx);
+  // Fetch initial queue status
+  const statusResult = await sendMessage({
+    type: 'GET_QUEUE_STATUS',
+    payload: { projectPath: listInfo.projectPath },
+  });
+  if (statusResult.ok) {
+    currentQueueStatus = statusResult.data;
+    rerenderAllStrips(rows, mountContext, ctx);
+    renderStatusBar(mountContext, ctx);
+  }
+  // Watch for new rows (pagination, infinite scroll)
+  const listContainer = document.querySelector('.issuable-list')
+    || document.querySelector('.mr-list')
+    || document.querySelector('[data-testid="issuable-list"]')
+    || document.body;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const observer = new MutationObserver(() => {
+    if (suppressObserver) return; // Skip mutations caused by our own DOM manipulation
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+
+      // Prune stale entries — GitLab's SPA can destroy DOM nodes on navigation
+      let prunedCount = 0;
+      for (const [iid, mounted] of mountedStrips) {
+        if (!mounted.container.isConnected) {
+          mounted.root.unmount();
+          mountedStrips.delete(iid);
+          prunedCount++;
+        }
+      }
+      for (const [key, mounted] of mountedGroupHeaders) {
+        if (!mounted.container.isConnected) {
+          mounted.root.unmount();
+          mountedGroupHeaders.delete(key);
+        }
+      }
+
+      const currentRows = findMrRows();
+      const newRows = currentRows.filter((r) => !mountedStrips.has(r.mrIid));
+      if (newRows.length === 0 && prunedCount === 0) return;
+
+      // If we pruned stale entries or found new rows, refresh queue status
+      // so strips render with current queue data (completed, running, etc.)
+      const refreshQueueStatus = async () => {
+        const statusResult = await sendMessage({
+          type: 'GET_QUEUE_STATUS',
+          payload: { projectPath: mountContext.projectPath },
+        });
+        if (statusResult.ok) {
+          currentQueueStatus = statusResult.data;
+          rerenderAllStrips(currentRows, mountContext, ctx);
+          renderStatusBar(mountContext, ctx);
+          rerenderToolbar?.();
+        }
+      };
+
+      if (newRows.length === 0) {
+        // Only pruned — just refresh queue status for existing rows
+        refreshQueueStatus();
+        return;
+      }
+
+      // Reconnect queue port if it was lost during navigation
+      if (!queuePort) {
+        connectQueuePort(mountContext, currentRows, ctx);
+      }
+
+      // Fetch previews for new rows
+      const newIids = newRows.map((r) => r.mrIid);
+      sendMessage({
+        type: 'FETCH_MR_PREVIEWS_BATCH',
+        payload: {
+          hostId: mountContext.hostId,
+          projectId: mountContext.projectId,
+          projectPath: mountContext.projectPath,
+          mrIids: newIids,
+        },
+      }).then((result) => {
+        if (result.ok) {
+          for (const [iidStr, preview] of Object.entries(result.data)) {
+            previewCache.set(Number(iidStr), preview);
+          }
+        }
+        for (const row of newRows) {
+          const preview = previewCache.get(row.mrIid);
+          const meta = extractMrMetaFromDom(row.element);
+          priorityCache.set(row.mrIid, computePriority({
+            filesChanged: preview?.filesChanged,
+            linesAdded: preview?.linesAdded,
+            linesRemoved: preview?.linesRemoved,
+            riskLevel: preview?.riskLevel,
+            labels: meta.labels,
+            mrState: preview?.state as 'opened' | 'closed' | 'merged' | 'locked' | undefined,
+          }));
+          mountEnhancedStrip(row, mountContext, ctx);
+        }
+
+        // Refresh queue status so new strips render with current data
+        refreshQueueStatus();
+      });
+    }, 200);
+  });
+  observer.observe(listContainer, { childList: true, subtree: true });
+  // Settings changes
+  const unsubscribe = onSettingsChange((newSettings) => {
+    if (newSettings.preferences.enabledFeatures?.mrListPreview === false) {
+      removeAll();
+    }
+  });
+  // Cleanup
+  ctx.signal.addEventListener('abort', () => {
+    observer.disconnect();
+    if (debounceTimer) clearTimeout(debounceTimer);
+    unsubscribe();
+    disconnectQueuePort();
+    removeAll();
+  }, { once: true });
+}
+function listenForSettingsToggle(
+  ctx: typeof ContentScriptContext.prototype,
+  listInfo: MrListInfo,
+): void {
+  let initialized = false;
+  const unsubscribe = onSettingsChange(async (newSettings) => {
+    if (initialized) return;
+    if (newSettings.preferences.enabledFeatures?.mrListPreview !== false) {
+      initialized = true;
+      unsubscribe();
+      await initMrListCommandCenter(ctx, listInfo);
+    }
+  });
+  ctx.signal.addEventListener('abort', () => { unsubscribe(); }, { once: true });
+}
+
+// ---------------------------------------------------------------------------
+// Basic previews fallback — used when mrReviewQueue is disabled.
+// Mounts simple MrPreviewStrip components (no queue, no grouping).
+// ---------------------------------------------------------------------------
+
+async function initBasicPreviews(
+  ctx: typeof ContentScriptContext.prototype,
+  listInfo: MrListInfo,
+): Promise<void> {
+  const isDark = detectDarkMode();
+
+  const hostResult = await sendMessage({
+    type: 'RESOLVE_GITLAB_HOST',
+    payload: { pageUrl: listInfo.hostUrl },
+  });
+  if (!hostResult.ok || !hostResult.data) return;
+  const host = hostResult.data;
+
+  const projectResult = await sendMessage({
+    type: 'FETCH_PROJECT',
+    payload: { hostId: host.id, projectPath: listInfo.projectPath },
+  });
+  if (!projectResult.ok) return;
+  const projectId = projectResult.data.id;
+
+  const mountCtx: MountContext = {
+    hostId: host.id,
+    projectId,
+    projectPath: listInfo.projectPath,
+    hostUrl: listInfo.hostUrl,
+    isDark,
+    brandColor: isDark ? '#40C4F5' : '#0c93e7',
+  };
+
+  const rows = findMrRows();
+  for (const row of rows) {
+    mountBasicStrip(row, mountCtx, ctx);
+  }
+
+  const listContainer = document.querySelector('.issuable-list')
+    || document.querySelector('.mr-list')
+    || document.querySelector('[data-testid="issuable-list"]')
+    || document.body;
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const observer = new MutationObserver(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      const currentRows = findMrRows();
+      for (const row of currentRows) {
+        if (!mountedStrips.has(row.mrIid)) {
+          mountBasicStrip(row, mountCtx, ctx);
+        }
+      }
+    }, 200);
+  });
+  observer.observe(listContainer, { childList: true, subtree: true });
+
+  const unsubscribe = onSettingsChange((newSettings) => {
+    if (newSettings.preferences.enabledFeatures?.mrListPreview === false) {
+      removeAll();
+    }
+  });
+
+  ctx.signal.addEventListener('abort', () => {
+    observer.disconnect();
+    if (debounceTimer) clearTimeout(debounceTimer);
+    unsubscribe();
+    removeAll();
+  }, { once: true });
+}
+
+// ---------------------------------------------------------------------------
+// Queue port — real-time updates from background
+// ---------------------------------------------------------------------------
+function connectQueuePort(
+  mountContext: MountContext,
+  rows: MrRowInfo[],
+  ctx: typeof ContentScriptContext.prototype,
+): void {
+  try {
+    queuePort = chrome.runtime.connect({ name: `otto-queue:${mountContext.projectPath}` });
+    queuePort.onMessage.addListener((message: { type: string; payload: QueueStatus }) => {
+      if (message.type === 'QUEUE_STATUS_UPDATE') {
+        currentQueueStatus = message.payload;
+        const currentRows = findMrRows();
+        rerenderAllStrips(currentRows, mountContext, ctx);
+        renderStatusBar(mountContext, ctx);
+        rerenderToolbar?.(); // Update queue count badge
+      }
+    });
+    queuePort.onDisconnect.addListener(() => {
+      queuePort = null;
+    });
+  } catch {
+    // Port connection can fail if SW is restarting
+  }
+}
+function disconnectQueuePort(): void {
+  try {
+    queuePort?.disconnect();
+  } catch {
+    // Already disconnected
+  }
+  queuePort = null;
+}
+// ---------------------------------------------------------------------------
+// Sorting — respects ticket grouping so grouped MRs stay together
+// ---------------------------------------------------------------------------
+function sortAndReorderDom(rows: MrRowInfo[]): void {
+  const rowMap = new Map(rows.map((r) => [r.mrIid, r]));
+  const groupedIids = new Set<number>();
+  for (const group of currentGroups) {
+    for (const iid of group.mrIids) {
+      groupedIids.add(iid);
+    }
+  }
+
+  // Build the final order:
+  // 1. Grouped MRs — groups sorted by highest-priority MR, MRs within group sorted by sort key
+  // 2. Ungrouped MRs — sorted by sort key
+  const ordered: MrRowInfo[] = [];
+
+  // Sort groups by highest-priority MR within each group
+  const sortedGroups = [...currentGroups].sort((a, b) => {
+    const aTop = a.mrIids[0] ? (priorityCache.get(a.mrIids[0])?.score ?? 0) : 0;
+    const bTop = b.mrIids[0] ? (priorityCache.get(b.mrIids[0])?.score ?? 0) : 0;
+    return bTop - aTop;
+  });
+
+  for (const group of sortedGroups) {
+    // Sort MRs within the group by the current sort key
+    const groupRows = group.mrIids
+      .map((iid) => rowMap.get(iid))
+      .filter((r): r is MrRowInfo => r !== undefined)
+      .sort((a, b) => compareMrRows(a, b, currentSortKey));
+
+    // Update the group's mrIids to match the new sort order
+    group.mrIids = groupRows.map((r) => r.mrIid);
+
+    ordered.push(...groupRows);
+  }
+
+  // Ungrouped MRs sorted by sort key, placed after all groups
+  const ungroupedRows = currentUngrouped
+    .map((iid) => rowMap.get(iid))
+    .filter((r): r is MrRowInfo => r !== undefined)
+    .sort((a, b) => compareMrRows(a, b, currentSortKey));
+
+  ordered.push(...ungroupedRows);
+
+  // Reorder DOM nodes within their parent
+  const parent = ordered[0]?.element.parentElement;
+  if (!parent) return;
+
+  // Suppress observer while we manipulate the DOM
+  suppressObserver = true;
+  for (const row of ordered) {
+    parent.appendChild(row.element);
+  }
+  // Re-enable after a microtask so the observer's queued mutations are ignored
+  queueMicrotask(() => { suppressObserver = false; });
+}
+function compareMrRows(a: MrRowInfo, b: MrRowInfo, sortKey: QueueSortKey): number {
+  switch (sortKey) {
+    case 'priority': {
+      const pa = priorityCache.get(a.mrIid)?.score ?? 0;
+      const pb = priorityCache.get(b.mrIid)?.score ?? 0;
+      return pb - pa; // Higher priority first
+    }
+    case 'newest':
+      return b.mrIid - a.mrIid; // Higher IID = newer
+    case 'oldest':
+      return a.mrIid - b.mrIid;
+    case 'mostFiles': {
+      const fa = previewCache.get(a.mrIid)?.filesChanged ?? 0;
+      const fb = previewCache.get(b.mrIid)?.filesChanged ?? 0;
+      return fb - fa;
+    }
+    case 'mostLines': {
+      const la = (previewCache.get(a.mrIid)?.linesAdded ?? 0) + (previewCache.get(a.mrIid)?.linesRemoved ?? 0);
+      const lb = (previewCache.get(b.mrIid)?.linesAdded ?? 0) + (previewCache.get(b.mrIid)?.linesRemoved ?? 0);
+      return lb - la;
+    }
+    default:
+      return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DOM helpers
+// ---------------------------------------------------------------------------
+type MrRowInfo = {
+  element: Element;
+  mrIid: number;
+};
+type MrDomMeta = {
+  title: string;
+  sourceBranch: string;
+  labels: string[];
+  createdAt?: string;
+};
+function findMrRows(): MrRowInfo[] {
+  const rows: MrRowInfo[] = [];
+  const seen = new Set<number>();
+  const candidates = document.querySelectorAll(
+    '.merge-request, li[data-testid="issuable-container"], .issuable-list > li',
+  );
+  for (const el of candidates) {
+    const link = el.querySelector<HTMLAnchorElement>(
+      'a.js-prefetch-document, a[data-testid="issuable-title-link"], .merge-request-title-text a, .issuable-reference a, a.title',
+    );
+    if (!link) continue;
+    const iid = extractMrIid(link.href);
+    if (iid === null || seen.has(iid)) continue;
+    seen.add(iid);
+    rows.push({ element: el, mrIid: iid });
+  }
+  return rows;
+}
+function extractMrIid(href: string): number | null {
+  const match = href.match(/\/-\/merge_requests\/(\d+)/);
+  if (!match) return null;
+  return parseInt(match[1], 10);
+}
+function extractMrMetaFromDom(element: Element): MrDomMeta {
+  // Title from the MR link text
+  const titleEl = element.querySelector(
+    'a.js-prefetch-document, a[data-testid="issuable-title-link"], .merge-request-title-text a, a.title',
+  );
+  const title = titleEl?.textContent?.trim() ?? '';
+  // Source branch from the branch reference element
+  const branchEl = element.querySelector(
+    '.ref-name, [data-testid="issuable-branch-name"], .issuable-meta .branch-name',
+  );
+  const sourceBranch = branchEl?.textContent?.trim() ?? '';
+  // Labels from label elements
+  const labelEls = element.querySelectorAll(
+    '.gl-label-text, [data-testid="label-title"], .issuable-label',
+  );
+  const labels: string[] = [];
+  for (const el of labelEls) {
+    const text = el.textContent?.trim();
+    if (text) labels.push(text);
+  }
+  // Created at from time element
+  const timeEl = element.querySelector('time');
+  const createdAt = timeEl?.getAttribute('datetime') ?? undefined;
+  return { title, sourceBranch, labels, createdAt };
+}
+// ---------------------------------------------------------------------------
+// Mount / unmount
+// ---------------------------------------------------------------------------
+function mountEnhancedStrip(
+  row: MrRowInfo,
+  mountContext: MountContext,
+  ctx: typeof ContentScriptContext.prototype,
+): void {
+  // Don't double-mount
+  if (mountedStrips.has(row.mrIid)) return;
+  if (row.element.querySelector('[data-otto-mr-preview]')) return;
+  const preview = previewCache.get(row.mrIid);
+  if (!preview) {
+    // Fall back to basic strip if no preview data
+    mountBasicStrip(row, mountContext, ctx);
+    return;
+  }
+  const container = document.createElement('div');
+  container.setAttribute('data-otto-mr-preview', String(row.mrIid));
+  row.element.appendChild(container);
+  const shadow = container.attachShadow({ mode: 'open' });
+  const styleEl = document.createElement('style');
+  styleEl.textContent = getResetStyles();
+  shadow.appendChild(styleEl);
+  const mountPoint = document.createElement('div');
+  shadow.appendChild(mountPoint);
+  const root = createRoot(mountPoint);
+  renderEnhancedStrip(root, row.mrIid, preview, mountContext);
+  mountedStrips.set(row.mrIid, { container, root });
+  ctx.signal.addEventListener('abort', () => {
+    root.unmount();
+    container.remove();
+    mountedStrips.delete(row.mrIid);
+  }, { once: true });
+}
+function mountBasicStrip(
+  row: MrRowInfo,
+  mountContext: MountContext,
+  ctx: typeof ContentScriptContext.prototype,
+): void {
+  if (row.element.querySelector('[data-otto-mr-preview]')) return;
+  const container = document.createElement('div');
+  container.setAttribute('data-otto-mr-preview', String(row.mrIid));
+  row.element.appendChild(container);
+  const shadow = container.attachShadow({ mode: 'open' });
+  const styleEl = document.createElement('style');
+  styleEl.textContent = getResetStyles();
+  shadow.appendChild(styleEl);
+  const mountPoint = document.createElement('div');
+  shadow.appendChild(mountPoint);
+  const root = createRoot(mountPoint);
+  root.render(
+    createElement(ThemeProvider, {
+      isDark: mountContext.isDark,
+      children: createElement(MrPreviewStrip, {
+        hostId: mountContext.hostId,
+        projectId: mountContext.projectId,
+        projectPath: mountContext.projectPath,
+        mrIid: row.mrIid,
+      }),
+    }),
+  );
+  mountedStrips.set(row.mrIid, { container, root });
+  ctx.signal.addEventListener('abort', () => {
+    root.unmount();
+    container.remove();
+    mountedStrips.delete(row.mrIid);
+  }, { once: true });
+}
+function renderEnhancedStrip(
+  root: ReturnType<typeof createRoot>,
+  mrIid: number,
+  preview: MrPreviewData,
+  mountContext: MountContext,
+): void {
+  const queueItem = currentQueueStatus?.items.find((i) => i.mrIid === mrIid) ?? null;
+  const priority = priorityCache.get(mrIid) ?? null;
+  root.render(
+    createElement(ThemeProvider, {
+      isDark: mountContext.isDark,
+      children: createElement(MrEnhancedStrip, {
+        preview,
+        queueItem,
+        priority,
+        onEnqueue: (iid: number, failedTasksOnly?: boolean) => handleEnqueue(iid, mountContext, failedTasksOnly),
+        onPause: (iid: number) => handlePause(iid, mountContext),
+        onResume: (iid: number) => handleResume(iid, mountContext),
+        onCancel: (iid: number) => handleCancel(iid, mountContext),
+      }),
+    }),
+  );
+}
+function rerenderAllStrips(
+  rows: MrRowInfo[],
+  mountContext: MountContext,
+  ctx: typeof ContentScriptContext.prototype,
+): void {
+  for (const row of rows) {
+    const mounted = mountedStrips.get(row.mrIid);
+    const preview = previewCache.get(row.mrIid);
+    if (mounted && preview) {
+      renderEnhancedStrip(mounted.root, row.mrIid, preview, mountContext);
+    }
+  }
+}
+// ---------------------------------------------------------------------------
+// Group headers
+// ---------------------------------------------------------------------------
+function renderGroupHeaders(
+  rows: MrRowInfo[],
+  mountContext: MountContext,
+  ctx: typeof ContentScriptContext.prototype,
+): void {
+  // Suppress observer while we manipulate the DOM
+  suppressObserver = true;
+
+  // Remove existing headers
+  for (const [key, mounted] of mountedGroupHeaders) {
+    mounted.root.unmount();
+    mounted.container.remove();
+    mountedGroupHeaders.delete(key);
+  }
+  // Build a map of mrIid → DOM element
+  const rowMap = new Map(rows.map((r) => [r.mrIid, r.element]));
+  for (const group of currentGroups) {
+    if (group.mrIids.length === 0) continue;
+    // Find the first MR row in this group
+    const firstIid = group.mrIids[0];
+    const firstRow = rowMap.get(firstIid);
+    if (!firstRow) continue;
+    const container = document.createElement('div');
+    container.setAttribute('data-otto-ticket-group', group.ticketKey);
+    // Insert before the first MR row
+    firstRow.parentElement?.insertBefore(container, firstRow);
+    const shadow = container.attachShadow({ mode: 'open' });
+    const styleEl = document.createElement('style');
+    styleEl.textContent = getResetStyles();
+    shadow.appendChild(styleEl);
+    const mountPoint = document.createElement('div');
+    shadow.appendChild(mountPoint);
+    const root = createRoot(mountPoint);
+    root.render(
+      createElement(ThemeProvider, {
+        isDark: mountContext.isDark,
+        children: createElement(TicketGroupHeader, {
+          group,
+          onToggle: (ticketKey: string) => {
+            const g = currentGroups.find((gr) => gr.ticketKey === ticketKey);
+            if (!g) return;
+            g.expanded = !g.expanded;
+            // Show/hide child MR rows (skip the first — always visible)
+            for (let i = 1; i < g.mrIids.length; i++) {
+              const el = rowMap.get(g.mrIids[i]) as HTMLElement | undefined;
+              if (el) {
+                el.style.display = g.expanded ? '' : 'none';
+              }
+              // Also hide the strip
+              const strip = mountedStrips.get(g.mrIids[i]);
+              if (strip) {
+                strip.container.style.display = g.expanded ? '' : 'none';
+              }
+            }
+            // Re-render this header to update the toggle icon
+            renderGroupHeaders(rows, mountContext, ctx);
+          },
+        }),
+      }),
+    );
+    mountedGroupHeaders.set(group.ticketKey, { container, root });
+    // Add left border accent to child rows for tree visual
+    for (const iid of group.mrIids) {
+      const el = rowMap.get(iid) as HTMLElement | undefined;
+      if (el) {
+        el.style.borderLeft = `2px solid ${mountContext.brandColor}`;
+        el.style.paddingLeft = '8px';
+      }
+    }
+  }
+
+  // Re-enable observer after DOM manipulation
+  queueMicrotask(() => { suppressObserver = false; });
+}
+// ---------------------------------------------------------------------------
+// Toolbar
+// ---------------------------------------------------------------------------
+function mountToolbar(
+  mountContext: MountContext,
+  ctx: typeof ContentScriptContext.prototype,
+  totalMrCount: number,
+): void {
+  const listContainer = document.querySelector('.issuable-list')
+    || document.querySelector('.mr-list')
+    || document.querySelector('[data-testid="issuable-list"]');
+  if (!listContainer) return;
+  const container = document.createElement('div');
+  container.setAttribute('data-otto-toolbar', 'true');
+  listContainer.parentElement?.insertBefore(container, listContainer);
+  const shadow = container.attachShadow({ mode: 'open' });
+  const styleEl = document.createElement('style');
+  styleEl.textContent = getResetStyles();
+  shadow.appendChild(styleEl);
+  const mountPoint = document.createElement('div');
+  shadow.appendChild(mountPoint);
+  const root = createRoot(mountPoint);
+  const renderToolbar = () => {
+    const queuedCount = currentQueueStatus?.items.filter(
+      (i) => i.status === 'queued' || i.status === 'running',
+    ).length ?? 0;
+    root.render(
+      createElement(ThemeProvider, {
+        isDark: mountContext.isDark,
+        children: createElement(MrListToolbar, {
+          sortKey: currentSortKey,
+          onSortChange: (key: QueueSortKey) => {
+            currentSortKey = key;
+            const rows = findMrRows();
+            sortAndReorderDom(rows);
+            renderGroupHeaders(rows, mountContext, ctx);
+            renderToolbar();
+          },
+          onQueueAll: () => handleQueueAll(mountContext),
+          queuedCount,
+          totalCount: totalMrCount,
+        }),
+      }),
+    );
+  };
+  renderToolbar();
+  rerenderToolbar = renderToolbar; // Expose for queue status updates
+  mountedToolbar = { container, root };
+  ctx.signal.addEventListener('abort', () => {
+    root.unmount();
+    container.remove();
+    mountedToolbar = null;
+    rerenderToolbar = null;
+  }, { once: true });
+}
+// ---------------------------------------------------------------------------
+// Status bar
+// ---------------------------------------------------------------------------
+function renderStatusBar(
+  mountContext: MountContext,
+  ctx: typeof ContentScriptContext.prototype,
+): void {
+  if (!currentQueueStatus) return;
+  const activeCount = currentQueueStatus.items.filter(
+    (i) => i.status === 'running' || i.status === 'queued' || i.status === 'paused',
+  ).length;
+  // Remove if nothing active
+  if (activeCount === 0 && mountedStatusBar) {
+    mountedStatusBar.root.unmount();
+    mountedStatusBar.container.remove();
+    mountedStatusBar = null;
+    return;
+  }
+  if (activeCount === 0) return;
+  // Create if not exists
+  if (!mountedStatusBar) {
+    const listContainer = document.querySelector('.issuable-list')
+      || document.querySelector('.mr-list')
+      || document.querySelector('[data-testid="issuable-list"]');
+    if (!listContainer) return;
+    const container = document.createElement('div');
+    container.setAttribute('data-otto-status-bar', 'true');
+    listContainer.parentElement?.insertBefore(container, listContainer.nextSibling);
+    const shadow = container.attachShadow({ mode: 'open' });
+    const styleEl = document.createElement('style');
+    styleEl.textContent = getResetStyles();
+    shadow.appendChild(styleEl);
+    const mountPoint = document.createElement('div');
+    shadow.appendChild(mountPoint);
+    const root = createRoot(mountPoint);
+    mountedStatusBar = { container, root };
+    ctx.signal.addEventListener('abort', () => {
+      root.unmount();
+      container.remove();
+      mountedStatusBar = null;
+    }, { once: true });
+  }
+  mountedStatusBar.root.render(
+    createElement(ThemeProvider, {
+      isDark: mountContext.isDark,
+      children: createElement(QueueStatusBar, {
+        status: currentQueueStatus,
+        onPauseAll: () => handlePauseAll(mountContext),
+        onCancelAll: () => handleCancelAll(mountContext),
+      }),
+    }),
+  );
+}
+// ---------------------------------------------------------------------------
+// Queue action handlers
+// ---------------------------------------------------------------------------
+function handleEnqueue(mrIid: number, mountContext: MountContext, failedTasksOnly?: boolean): void {
+  const preview = previewCache.get(mrIid);
+
+  // Find the actual MR row element for this IID
+  const rows = findMrRows();
+  const row = rows.find((r) => r.mrIid === mrIid);
+  const meta = extractMrMetaFromDom(row?.element ?? document.body);
+
+  // Determine which tasks to run
+  let tasks = buildTaskListFromSettings();
+
+  if (failedTasksOnly) {
+    // Only retry tasks that failed in the previous run
+    const queueItem = currentQueueStatus?.items.find((i) => i.mrIid === mrIid);
+    if (queueItem?.progress?.tasks) {
+      const failedTasks = Object.entries(queueItem.progress.tasks)
+        .filter(([_, snap]) => snap.status === 'error')
+        .map(([name]) => name as ReviewTask);
+      if (failedTasks.length > 0) {
+        tasks = failedTasks;
+      }
+    }
+  }
+
+  sendMessage({
+    type: 'ENQUEUE_REVIEW',
+    payload: {
+      mrIid,
+      projectPath: mountContext.projectPath,
+      projectId: mountContext.projectId,
+      hostUrl: mountContext.hostUrl,
+      hostId: mountContext.hostId,
+      title: meta.title,
+      authorUsername: '',
+      sourceBranch: meta.sourceBranch,
+      targetBranch: '',
+      labels: meta.labels,
+      mrState: (preview?.state as 'opened' | 'closed' | 'merged' | 'locked') ?? 'opened',
+      filesChanged: preview?.filesChanged ?? 0,
+      linesAdded: preview?.linesAdded ?? 0,
+      linesRemoved: preview?.linesRemoved ?? 0,
+      riskLevel: preview?.riskLevel,
+      createdAt: meta.createdAt,
+      tasks: buildTaskListFromSettings(),
+    },
+  });
+}
+function handlePause(mrIid: number, mountContext: MountContext): void {
+  sendMessage({
+    type: 'PAUSE_REVIEW',
+    payload: { projectPath: mountContext.projectPath, mrIid },
+  });
+}
+function handleResume(mrIid: number, mountContext: MountContext): void {
+  sendMessage({
+    type: 'RESUME_REVIEW',
+    payload: { projectPath: mountContext.projectPath, mrIid },
+  });
+}
+function handleCancel(mrIid: number, mountContext: MountContext): void {
+  sendMessage({
+    type: 'CANCEL_REVIEW',
+    payload: { projectPath: mountContext.projectPath, mrIid },
+  });
+}
+function handleQueueAll(mountContext: MountContext): void {
+  const rows = findMrRows();
+  for (const row of rows) {
+    // Skip already queued/running/complete
+    const existing = currentQueueStatus?.items.find((i) => i.mrIid === row.mrIid);
+    if (existing && existing.status !== 'error') continue;
+    handleEnqueue(row.mrIid, mountContext);
+  }
+}
+function handlePauseAll(mountContext: MountContext): void {
+  if (!currentQueueStatus) return;
+  for (const item of currentQueueStatus.items) {
+    if (item.status === 'running' || item.status === 'queued') {
+      sendMessage({
+        type: 'PAUSE_REVIEW',
+        payload: { projectPath: mountContext.projectPath, mrIid: item.mrIid },
+      });
+    }
+  }
+}
+function handleCancelAll(mountContext: MountContext): void {
+  if (!currentQueueStatus) return;
+  for (const item of currentQueueStatus.items) {
+    if (item.status === 'queued' || item.status === 'running' || item.status === 'paused') {
+      sendMessage({
+        type: 'CANCEL_REVIEW',
+        payload: { projectPath: mountContext.projectPath, mrIid: item.mrIid },
+      });
+    }
+  }
+}
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
+function removeAll(): void {
+  for (const [iid, strip] of mountedStrips) {
+    strip.root.unmount();
+    strip.container.remove();
+    mountedStrips.delete(iid);
+  }
+  for (const [key, header] of mountedGroupHeaders) {
+    header.root.unmount();
+    header.container.remove();
+    mountedGroupHeaders.delete(key);
+  }
+  if (mountedToolbar) {
+    mountedToolbar.root.unmount();
+    mountedToolbar.container.remove();
+    mountedToolbar = null;
+    rerenderToolbar = null;
+  }
+  if (mountedStatusBar) {
+    mountedStatusBar.root.unmount();
+    mountedStatusBar.container.remove();
+    mountedStatusBar = null;
+  }
+  disconnectQueuePort();
+}
+
+// ---------------------------------------------------------------------------
+// Task list builder — respects user's enabled feature preferences
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the review task list from the user's enabled features.
+ * Called at enqueue time so each queued review runs exactly what the user wants.
+ */
+function buildTaskListFromSettings(): ReviewTask[] {
+  const enabled = cachedEnabledFeatures;
+  const tasks: ReviewTask[] = [];
+
+  // Core tasks — enabled by default unless explicitly disabled
+  if (enabled?.summary !== false) tasks.push('summary');
+  if (enabled?.codeReview !== false) tasks.push('codeReview');
+  if (enabled?.edgeCases !== false) tasks.push('edgeCases');
+  if (enabled?.relatedFiles !== false) tasks.push('relatedFiles');
+
+  // Verification tasks — disabled by default, only if explicitly enabled
+  if (enabled?.adversarialTests === true) tasks.push('adversarialTests');
+  if (enabled?.contracts === true) tasks.push('contracts');
+  if (enabled?.behavioralDelta === true) tasks.push('behavioralDelta');
+
+  // Always include at least summary + codeReview
+  if (tasks.length === 0) {
+    tasks.push('summary', 'codeReview');
+  }
+
+  return tasks;
+}
+
+// ---------------------------------------------------------------------------
+// Theme detection
+// ---------------------------------------------------------------------------
+function detectDarkMode(): boolean {
+  const body = document.body;
+  const html = document.documentElement;
+  if (body.classList.contains('gl-dark') || html.classList.contains('gl-dark')) return true;
+  if (body.getAttribute('data-color-scheme') === 'dark') return true;
+  const bgColor = getComputedStyle(body).backgroundColor;
+  if (bgColor) {
+    const match = bgColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    if (match) {
+      const brightness = (parseInt(match[1]) + parseInt(match[2]) + parseInt(match[3])) / 3;
+      if (brightness < 128) return true;
+    }
+  }
+  return false;
+}
+// ---------------------------------------------------------------------------
+// Shadow DOM styles
+// ---------------------------------------------------------------------------
+function getResetStyles(): string {
+  return `
+    :host {
+      display: block;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  `;
+}

@@ -22,6 +22,9 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   followUp: 'Comment Follow-Up',
   chat: 'MR Chat Q&A',
   acValidation: 'AC Validation',
+  adversarialTests: 'Adversarial Tests',
+  contracts: 'Contract Inference',
+  behavioralDelta: 'Behavioral Delta',
 };
 
 export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {

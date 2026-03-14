@@ -17,8 +17,9 @@ import { createRoot } from 'react-dom/client';
 import { parseMrUrl, waitForDiffsTab, observeDiffFiles } from '@/lib/dom-observer';
 import { buildMrContext } from '@/services/gitlab/mr-parser';
 import { useReviewStore } from '@/services/review/review-store';
-import { startReviewStream, tryLoadCachedReview } from '@/services/review/stream-dispatcher';
+import { startReviewStream, tryLoadCachedReview, dispatchStreamChunk } from '@/services/review/stream-dispatcher';
 import { sendMessage } from '@/lib/messaging';
+import { setMrQueuePort, getMrQueuePort, disconnectMrQueuePort } from '@/services/review/queue-bridge';
 import { MrOverviewPanel } from '@/components/review/MrOverviewPanel';
 import { FileReviewCard } from '@/components/review/FileReviewCard';
 import { FileReviewFooter } from '@/components/review/FileReviewFooter';
@@ -35,6 +36,9 @@ import { useChatStore } from '@/services/chat/chat-store';
 import { tryLoadCachedChat } from '@/services/chat/chat-stream-dispatcher';
 import { createElement } from 'react';
 import type { ReviewTask } from '@/services/review/review-types';
+import type { OttoSettings } from '@/types/settings';
+import { startHealthMonitor } from '@/services/review/health-monitor';
+import { HealthWarningToast } from '@/components/review/HealthWarningToast';
 
 export default defineContentScript({
   matches: ['*://*/*'],
@@ -47,31 +51,45 @@ export default defineContentScript({
 
     const isDarkMode = detectDarkMode();
 
+    // Start health monitor early — before any heavy work begins.
+    startHealthMonitor(ctx.signal);
+
+    // Fetch settings once upfront — used to gate features below.
+    const settingsResult = await sendMessage({ type: 'GET_SETTINGS' });
+    const settings: OttoSettings | null = settingsResult.ok ? settingsResult.data : null;
+    const enabled = settings?.preferences.enabledFeatures;
+
     // Build a lightweight MR context immediately (no API diff fetch).
     // This gives follow-up buttons the mrContext they need on any tab.
     const lightContext = await buildMrContext(false);
     if (lightContext) {
       useReviewStore.getState().setMrContext(lightContext);
       // Load cached chat history for this MR
-      tryLoadCachedChat(lightContext.projectPath, lightContext.mrIid);
+      if (enabled?.chat !== false) {
+        tryLoadCachedChat(lightContext.projectPath, lightContext.mrIid);
+      }
     }
 
-    // Start follow-up button injection immediately — comments exist on
-    // the overview tab, discussion tab, AND the diffs tab.
-    startFollowUpButtonInjection(isDarkMode, ctx.signal);
+    // Start follow-up button injection — comments exist on all tabs.
+    // Only inject if the feature is enabled.
+    if (enabled?.followUp !== false) {
+      startFollowUpButtonInjection(isDarkMode, ctx.signal);
+    }
 
     // Mount the chat UI — available on any MR tab, not just diffs.
-    // The chat needs MR context but not necessarily a completed review.
-    mountChatUI(ctx, isDarkMode);
+    // Always mount the overlay (for health toast), but only include
+    // chat components if the feature is enabled.
+    mountChatUI(ctx, isDarkMode, enabled?.chat !== false);
 
     // The rest of the review features require the diffs tab.
-    // Run this in parallel so follow-up buttons aren't blocked.
-    initDiffsFeatures(ctx, urlInfo, isDarkMode);
+    initDiffsFeatures(ctx, urlInfo, isDarkMode, enabled);
 
     ctx.addEventListener(window, 'wxt:locationchange', async (event) => {
       const newUrlInfo = parseMrUrl(event.newUrl.href);
       if (!newUrlInfo) return;
       if (newUrlInfo.mrIid !== urlInfo.mrIid || newUrlInfo.projectPath !== urlInfo.projectPath) {
+        // Disconnect queue port for the old MR — prevents stale chunks
+        disconnectMrQueuePort();
         useReviewStore.getState().reset();
         useChatStore.getState().reset();
         const newContext = await buildMrContext(false);
@@ -96,6 +114,7 @@ async function initDiffsFeatures(
   ctx: typeof ContentScriptContext.prototype,
   urlInfo: { hostUrl: string; projectPath: string; mrIid: number },
   isDarkMode: boolean,
+  enabled?: Record<string, boolean>,
 ): Promise<void> {
   const diffsContainer = await waitForDiffsTab(ctx.signal);
   if (!diffsContainer) return;
@@ -106,6 +125,8 @@ async function initDiffsFeatures(
 
   useReviewStore.getState().setMrContext(mrContext);
 
+  // Overview panel is always mounted — it shows disabled states for
+  // turned-off features and lets users click to run them ad-hoc.
   await mountOverviewPanel(ctx, isDarkMode);
 
   observeDiffFiles((fileElement, filePath) => {
@@ -113,20 +134,22 @@ async function initDiffsFeatures(
     mountFileReviewFooter(ctx, fileElement, filePath, isDarkMode);
   }, ctx.signal);
 
-  // Inject inline comments next to diff lines as reviews complete
-  startInlineCommentInjection(isDarkMode, ctx.signal);
+  // Code review injectors — only start if codeReview is enabled
+  if (enabled?.codeReview !== false) {
+    startInlineCommentInjection(isDarkMode, ctx.signal);
+    startRiskInjection(isDarkMode, ctx.signal);
+  }
 
-  // Inject related files + review queue into GitLab's sidebar file tree
-  startRelatedFilesSidebar(isDarkMode, ctx.signal);
+  // Related files sidebar — only start if relatedFiles is enabled
+  if (enabled?.relatedFiles !== false) {
+    startRelatedFilesSidebar(isDarkMode, ctx.signal);
+  }
 
-  // Inject risk dots into GitLab's native file tree rows
-  startRiskInjection(isDarkMode, ctx.signal);
-
-  // Start keyboard shortcut manager for review navigation
+  // Keyboard shortcuts always active (they navigate existing UI)
   startKeyboardManager(ctx.signal);
 
   // Load cached review or auto-review if preference is enabled
-  await loadOrAutoReview(mrContext);
+  await loadOrAutoReview(mrContext, enabled);
 }
 
 async function mountOverviewPanel(
@@ -296,6 +319,7 @@ function getFooterResetStyles(): string {
 async function mountChatUI(
   ctx: typeof ContentScriptContext.prototype,
   isDarkMode: boolean,
+  chatEnabled: boolean,
 ): Promise<void> {
   // Mount into a fixed-position shadow DOM container on the body
   const ui = await createShadowRootUi(ctx, {
@@ -315,10 +339,13 @@ async function mountChatUI(
       root.render(
         createElement(ThemeProvider, {
           isDark: isDarkMode,
-          children: createElement(OttoErrorBoundary, { name: 'Chat' },
-            createElement('div', null,
+          children: createElement('div', null,
+            chatEnabled && createElement(OttoErrorBoundary, { name: 'Chat' },
               createElement(ChatPill),
               createElement(ChatPanel),
+            ),
+            createElement(OttoErrorBoundary, { name: 'HealthToast' },
+              createElement(HealthWarningToast),
             ),
           ),
         }),
@@ -359,8 +386,28 @@ function getChatStyles(): string {
 // user has enabled the preference and has an AI provider configured.
 // ---------------------------------------------------------------------------
 
-async function loadOrAutoReview(mrContext: import('@/types/review').MrContext): Promise<void> {
-  // Try loading from cache first
+async function loadOrAutoReview(
+  mrContext: import('@/types/review').MrContext,
+  enabled?: Record<string, boolean>,
+): Promise<void> {
+  // Check the queue FIRST — it's the authority for in-progress reviews.
+  // A review at 60% won't have a complete cache yet, so checking cache first
+  // would miss it and fall through to starting a duplicate.
+  const queueResult = await sendMessage({
+    type: 'GET_QUEUE_STATUS',
+    payload: { projectPath: mrContext.projectPath },
+  });
+  if (queueResult.ok) {
+    const queuedItem = queueResult.data.items.find(
+      (i) => i.mrIid === mrContext.mrIid && (i.status === 'queued' || i.status === 'running' || i.status === 'paused'),
+    );
+    if (queuedItem) {
+      subscribeToQueueUpdates(mrContext);
+      return;
+    }
+  }
+
+  // No active queue item — try loading from cache (completed reviews)
   const cached = await tryLoadCachedReview(mrContext);
   if (cached) return; // Cache hit — no need to call AI
 
@@ -374,8 +421,145 @@ async function loadOrAutoReview(mrContext: import('@/types/review').MrContext): 
   const hasGitLabHost = settings.gitlab.hosts.some(
     (h) => mrContext.hostUrl.toLowerCase().startsWith(h.url.toLowerCase()),
   );
-  const tasks: ReviewTask[] = ['summary', 'codeReview', 'edgeCases'];
-  if (hasGitLabHost) tasks.push('relatedFiles');
+
+  // Build task list from enabled features only
+  const allTasks: ReviewTask[] = ['summary', 'codeReview', 'edgeCases'];
+  if (hasGitLabHost) allTasks.push('relatedFiles');
+
+  // Include verification tasks if explicitly enabled
+  if (enabled?.adversarialTests === true) allTasks.push('adversarialTests');
+  if (enabled?.contracts === true) allTasks.push('contracts');
+  if (enabled?.behavioralDelta === true) allTasks.push('behavioralDelta');
+
+  const tasks = allTasks.filter((t) => enabled?.[t] !== false);
+  if (tasks.length === 0) return; // Nothing to do
 
   startReviewStream(mrContext, tasks);
+}
+
+// ---------------------------------------------------------------------------
+// Queue subscription — live updates when MR is being reviewed via the queue.
+//
+// When the user navigates to an MR that's queued or running, we:
+// 1. Set the store to 'loading' so the UI shows progress (not "Review MR")
+// 2. Connect a queue port for real-time status updates
+// 3. Sync task progress dots from queue snapshots
+// 4. Auto-hydrate from cache when the review completes
+// 5. Show error if the review fails
+// ---------------------------------------------------------------------------
+
+function subscribeToQueueUpdates(
+  mrContext: import('@/types/review').MrContext,
+): void {
+  const store = useReviewStore.getState();
+
+  // Disconnect any existing queue port from a previous navigation
+  disconnectMrQueuePort();
+
+  // Load partial cache first — if the queue has been saving partial results
+  // every 10s, we can show completed summary/files immediately instead of
+  // starting from a blank loading state. New chunks will layer on top.
+  tryLoadCachedReview(mrContext).then((loaded) => {
+    if (loaded) {
+      const s = useReviewStore.getState();
+      // Only override to streaming if the review isn't already complete.
+      // Edge case: review finished between page load and queue check —
+      // hydrateFromCache set status to 'complete', don't overwrite it.
+      if (s.status !== 'complete') {
+        s.setStatus('streaming');
+        s.setProgressMessage('Review is running from the queue...');
+      }
+    }
+  });
+
+  // Set status to loading without resetting results — preserves any partial
+  // data and doesn't wipe progress. The queue is the source of truth for progress.
+  store.setStatus('loading');
+  store.setProgressMessage('Review is running from the queue...');
+
+  let port: chrome.runtime.Port;
+  try {
+    port = chrome.runtime.connect({ name: `otto-queue:${mrContext.projectPath}` });
+    setMrQueuePort(port);
+  } catch {
+    store.setProgressMessage('Review is queued. Refresh to see results when complete.');
+    return;
+  }
+
+  port.onMessage.addListener((message: { type: string; payload: any }) => {
+    // Forward stream chunks directly to the store — live results rendering
+    if (message.type === 'QUEUE_STREAM_CHUNK') {
+      const { mrIid: chunkMrIid, chunk } = message.payload;
+      if (chunkMrIid === mrContext.mrIid) {
+        // Don't dispatch STREAM_ALL_COMPLETE — we handle completion via status update
+        // to avoid the store marking complete before cache is saved
+        if (chunk.type !== 'STREAM_ALL_COMPLETE' && chunk.type !== 'STREAM_REVIEW_PAUSED') {
+          dispatchStreamChunk(chunk);
+        }
+      }
+      return;
+    }
+
+    if (message.type !== 'QUEUE_STATUS_UPDATE') return;
+
+    const item = message.payload.items.find((i: any) => i.mrIid === mrContext.mrIid);
+    if (!item) return;
+
+    const s = useReviewStore.getState();
+
+    // Sync task progress dots from the queue snapshot
+    if (item.progress) {
+      for (const [taskName, taskSnap] of Object.entries(item.progress.tasks) as Array<[string, { status: 'idle' | 'loading' | 'streaming' | 'complete' | 'error' }]>) {
+        const validTasks = ['summary', 'codeReview', 'edgeCases', 'relatedFiles', 'fileActivity', 'adversarialTests', 'contracts', 'behavioralDelta'];
+        if (validTasks.includes(taskName)) {
+          s.setTaskStatus(taskName as import('@/services/review/review-types').ReviewTask, taskSnap.status);
+        }
+      }
+      // Sync file review count
+      if (item.progress.filesTotal > 0) {
+        s.setFileReviewsTotal(item.progress.filesTotal);
+      }
+    }
+
+    switch (item.status) {
+      case 'queued':
+        s.setProgressMessage('Review is queued. It will start automatically.');
+        break;
+
+      case 'running': {
+        const pct = item.progress?.overallPercent ?? 0;
+        const filesInfo = item.progress?.filesTotal
+          ? ` (${item.progress.filesComplete}/${item.progress.filesTotal} files)`
+          : '';
+        s.setProgressMessage(`Queue review in progress: ${pct}%${filesInfo}`);
+        // Keep status as streaming once we have progress
+        if (pct > 0) s.setStatus('streaming');
+        break;
+      }
+
+      case 'paused':
+        s.setProgressMessage('Queue review is paused. Resume from the MR list page.');
+        break;
+
+      case 'complete':
+        // Review finished — load results from cache and hydrate the store
+        s.setProgressMessage('Queue review complete. Loading results...');
+        tryLoadCachedReview(mrContext).then((loaded) => {
+          if (!loaded) {
+            s.setProgressMessage('Review complete but results not found. Try refreshing.');
+          }
+        });
+        disconnectMrQueuePort();
+        break;
+
+      case 'error':
+        s.setError(item.error ?? 'Queue review failed');
+        disconnectMrQueuePort();
+        break;
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    setMrQueuePort(null);
+  });
 }

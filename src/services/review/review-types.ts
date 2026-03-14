@@ -16,11 +16,20 @@ export type {
   DiffFileData,
 } from '@/types/review';
 
+export type {
+  VerificationData,
+  AdversarialTestData,
+  ContractData,
+  BehavioralDeltaData,
+  TrustAssessment,
+} from '@/types/verification';
+
 /**
  * Tasks that the review orchestrator can execute.
  * Used by the streaming protocol to specify which tasks to run.
  */
-export type ReviewTask = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'fileActivity';
+export type ReviewTask = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'fileActivity'
+  | 'adversarialTests' | 'contracts' | 'behavioralDelta';
 
 /**
  * Progress tracking for the review pipeline.
@@ -32,6 +41,9 @@ export type ReviewProgress = {
   edgeCases: TaskProgress;
   relatedFiles: TaskProgress;
   fileActivity: TaskProgress;
+  adversarialTests: TaskProgress;
+  contracts: TaskProgress;
+  behavioralDelta: TaskProgress;
 };
 
 export type TaskProgress = {
@@ -55,4 +67,7 @@ export const INITIAL_REVIEW_PROGRESS: ReviewProgress = {
   edgeCases: { ...INITIAL_TASK_PROGRESS },
   relatedFiles: { ...INITIAL_TASK_PROGRESS },
   fileActivity: { ...INITIAL_TASK_PROGRESS },
+  adversarialTests: { ...INITIAL_TASK_PROGRESS },
+  contracts: { ...INITIAL_TASK_PROGRESS },
+  behavioralDelta: { ...INITIAL_TASK_PROGRESS },
 };

@@ -16,6 +16,8 @@
 // - We observe specific containers (not document.body) to minimize overhead.
 // ---------------------------------------------------------------------------
 
+import { getHealthLevel } from '@/services/review/health-monitor';
+
 /**
  * Watch for new .diff-file elements appearing in the DOM.
  * Calls `onFile` for each new file, including files already present when
@@ -81,6 +83,9 @@ export function observeDiffFiles(
   scanExisting();
 
   // Watch for new files (lazy loading, virtual scrolling re-creation)
+  // and handle removals (virtual scrolling destroys elements).
+  // Single observer handles both — avoids two observers on the same container
+  // with identical options, which doubles mutation processing overhead.
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
@@ -91,15 +96,6 @@ export function observeDiffFiles(
         const nested = node.querySelectorAll('.diff-file.file-holder');
         nested.forEach(processDiffFile);
       }
-    }
-  });
-
-  const container = document.querySelector('.diff-files-holder') || document.body;
-  observer.observe(container, { childList: true, subtree: true });
-
-  // Handle virtual scrolling: files can be removed and re-added.
-  const removalObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
       for (const node of mutation.removedNodes) {
         if (!(node instanceof Element)) continue;
         if (node.matches('.diff-file.file-holder')) {
@@ -109,11 +105,17 @@ export function observeDiffFiles(
       }
     }
   });
-  removalObserver.observe(container, { childList: true, subtree: true });
+
+  const container = document.querySelector('.diff-files-holder') || document.body;
+  observer.observe(container, { childList: true, subtree: true });
 
   // Periodic rescan — catches virtual scrolling edge cases where
-  // elements are recreated without triggering mutation observers
-  const rescanInterval = setInterval(rescanForMissing, 3000);
+  // elements are recreated without triggering mutation observers.
+  // Skipped in critical health to reduce main thread pressure.
+  const rescanInterval = setInterval(() => {
+    if (getHealthLevel() === 'critical') return;
+    rescanForMissing();
+  }, 3000);
 
   // Rescan when tab becomes visible again — GitLab may re-render
   const handleVisibility = () => {
@@ -126,7 +128,6 @@ export function observeDiffFiles(
 
   function cleanup() {
     observer.disconnect();
-    removalObserver.disconnect();
     clearInterval(rescanInterval);
     document.removeEventListener('visibilitychange', handleVisibility);
     processed.clear();

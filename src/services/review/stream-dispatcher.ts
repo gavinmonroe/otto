@@ -8,6 +8,11 @@
 // Performance: streaming deltas are batched and flushed at ~60fps via
 // requestAnimationFrame. This prevents hundreds of store updates per second
 // from hammering subscriptions and crashing the tab on large MRs.
+//
+// Health-aware: when the health monitor detects degradation, flushing is
+// throttled (degraded → 30fps) or paused (critical → buffer only, flush
+// on completion or recovery). This prevents Otto from being the cause of
+// the very crash it's trying to detect.
 // ---------------------------------------------------------------------------
 
 import { useReviewStore } from '@/services/review/review-store';
@@ -22,24 +27,83 @@ import {
   computeFileDiffHashes,
   type CachedReview,
 } from './review-cache';
+import { getHealthLevel, onHealthLevelChange, type HealthLevel } from './health-monitor';
 
 // ---------------------------------------------------------------------------
-// Delta batching — accumulates streaming deltas and flushes once per frame.
+// Delta batching — accumulates streaming deltas and flushes based on
+// the current health level.
+//
+// normal:   flush at ~60fps via requestAnimationFrame
+// degraded: flush at ~30fps via setTimeout(33)
+// critical: pause flushing (buffer only), flush on completion or recovery
 // ---------------------------------------------------------------------------
 
 let pendingSummaryDelta = '';
 const pendingFileDeltas = new Map<string, string>();
 let pendingEdgeCasesDelta = '';
+let pendingAdversarialTestsDelta = '';
+let pendingContractsDelta = '';
+let pendingBehavioralDeltaDelta = '';
 let flushScheduled = false;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Subscribe to health level changes — flush buffered deltas on recovery
+let healthCleanup: (() => void) | null = null;
+
+function ensureHealthSubscription(): void {
+  if (healthCleanup) return;
+  healthCleanup = onHealthLevelChange(
+    (level) => {
+      // When recovering from critical, flush any buffered deltas
+      if (level !== 'critical' && hasPendingDeltas()) {
+        scheduleDeltaFlush();
+      }
+    },
+    // onCleanup — monitor shut down, reset so we re-subscribe on restart
+    () => { healthCleanup = null; },
+  );
+}
+
+function hasPendingDeltas(): boolean {
+  return !!(pendingSummaryDelta || pendingFileDeltas.size > 0 || pendingEdgeCasesDelta
+    || pendingAdversarialTestsDelta || pendingContractsDelta || pendingBehavioralDeltaDelta);
+}
 
 function scheduleDeltaFlush(): void {
   if (flushScheduled) return;
   flushScheduled = true;
-  requestAnimationFrame(flushDeltas);
+
+  // Cancel any pending timer from a previous health level to prevent
+  // stacking a setTimeout and rAF simultaneously during transitions.
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+
+  const level = getHealthLevel();
+
+  if (level === 'critical') {
+    // Don't schedule — deltas stay buffered until completion or recovery
+    flushScheduled = false;
+    return;
+  }
+
+  if (level === 'degraded') {
+    // Throttle to ~30fps
+    flushTimer = setTimeout(flushDeltas, 33);
+  } else {
+    // Normal — full 60fps via rAF
+    requestAnimationFrame(flushDeltas);
+  }
 }
 
 function flushDeltas(): void {
   flushScheduled = false;
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+
   const s = useReviewStore.getState();
 
   if (pendingSummaryDelta) {
@@ -58,13 +122,30 @@ function flushDeltas(): void {
     s.appendEdgeCasesDelta(pendingEdgeCasesDelta);
     pendingEdgeCasesDelta = '';
   }
+
+  if (pendingAdversarialTestsDelta) {
+    s.appendAdversarialTestsDelta(pendingAdversarialTestsDelta);
+    pendingAdversarialTestsDelta = '';
+  }
+
+  if (pendingContractsDelta) {
+    s.appendContractsDelta(pendingContractsDelta);
+    pendingContractsDelta = '';
+  }
+
+  if (pendingBehavioralDeltaDelta) {
+    s.appendBehavioralDeltaDelta(pendingBehavioralDeltaDelta);
+    pendingBehavioralDeltaDelta = '';
+  }
 }
 
 /**
  * Dispatch a stream chunk to the review store.
  * Delta chunks are batched; completion/error chunks are dispatched immediately.
+ * Health-aware: delta flushing is throttled or paused based on tab health.
  */
 export function dispatchStreamChunk(chunk: StreamChunk): void {
+  ensureHealthSubscription();
   const s = useReviewStore.getState();
 
   switch (chunk.type) {
@@ -121,6 +202,50 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
     case 'STREAM_AC_VALIDATION_COMPLETE':
       s.setAcValidation(chunk.payload.acValidation);
       break;
+    // Verification stream chunks
+    case 'STREAM_ADVERSARIAL_TESTS_DELTA':
+      pendingAdversarialTestsDelta += chunk.payload.content;
+      scheduleDeltaFlush();
+      // Mark verification as generating on first delta
+      if (s.verification.status === 'idle') s.setVerificationGenerating();
+      break;
+    case 'STREAM_ADVERSARIAL_TESTS_COMPLETE':
+      if (pendingAdversarialTestsDelta) {
+        s.appendAdversarialTestsDelta(pendingAdversarialTestsDelta);
+        pendingAdversarialTestsDelta = '';
+      }
+      s.setAdversarialTests(chunk.payload.data);
+      break;
+    case 'STREAM_CONTRACTS_DELTA':
+      pendingContractsDelta += chunk.payload.content;
+      scheduleDeltaFlush();
+      if (s.verification.status === 'idle') s.setVerificationGenerating();
+      break;
+    case 'STREAM_CONTRACTS_COMPLETE':
+      if (pendingContractsDelta) {
+        s.appendContractsDelta(pendingContractsDelta);
+        pendingContractsDelta = '';
+      }
+      s.setContracts(chunk.payload.data);
+      break;
+    case 'STREAM_BEHAVIORAL_DELTA_DELTA':
+      pendingBehavioralDeltaDelta += chunk.payload.content;
+      scheduleDeltaFlush();
+      if (s.verification.status === 'idle') s.setVerificationGenerating();
+      break;
+    case 'STREAM_BEHAVIORAL_DELTA_COMPLETE':
+      if (pendingBehavioralDeltaDelta) {
+        s.appendBehavioralDeltaDelta(pendingBehavioralDeltaDelta);
+        pendingBehavioralDeltaDelta = '';
+      }
+      s.setBehavioralDelta(chunk.payload.data);
+      break;
+    case 'STREAM_TRUST_COMPLETE':
+      s.setTrustAssessment(chunk.payload.trust);
+      break;
+    case 'STREAM_CI_EXECUTION_COMPLETE':
+      s.setCiExecution(chunk.payload.result);
+      break;
     case 'STREAM_PROGRESS':
       // Ignore empty keepalive messages from the service worker
       if (chunk.payload.message) {
@@ -138,6 +263,11 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
       // Flush any remaining deltas before completing
       flushDeltas();
       s.completeReview();
+      break;
+    case 'STREAM_REVIEW_PAUSED':
+      // Review was paused (queue feature). Flush deltas so partial results
+      // are visible, but don't mark as complete — the review can be resumed.
+      flushDeltas();
       break;
   }
 }
@@ -206,6 +336,7 @@ export function retryReviewTasks(
             ticketKeys: state.ticketKeys,
             fileActivity: state.fileActivity,
             acValidation: state.acValidation,
+            verification: state.verification,
           };
           saveCachedReview(cached);
         }
@@ -268,6 +399,7 @@ export function startReviewStream(
             ticketKeys: state.ticketKeys,
             fileActivity: state.fileActivity,
             acValidation: state.acValidation,
+            verification: state.verification,
           };
           saveCachedReview(cached);
         }

@@ -14,6 +14,7 @@
 
 import { useReviewStore } from '@/services/review/review-store';
 import type { FileReview } from '@/types/review';
+import { getHealthLevel } from '@/services/review/health-monitor';
 
 const INJECTED_ATTR = 'data-otto-risk-dot';
 
@@ -174,19 +175,27 @@ export function startRiskInjection(isDarkMode: boolean, signal?: AbortSignal): (
     debounceTimer = setTimeout(update, 200);
   }
 
-  // Subscribe to store — update when file reviews change
-  const unsubscribe = useReviewStore.subscribe((state) => {
-    const newMap = computeRiskMap(state.fileReviews);
-    currentRiskMap = newMap;
-    debouncedUpdate();
-  });
-
   // Initial injection from current state
   const initialState = useReviewStore.getState();
   if (initialState.fileReviews.length > 0) {
     currentRiskMap = computeRiskMap(initialState.fileReviews);
     update();
   }
+
+  // Track previous fileReviews reference to skip unrelated store updates.
+  // Without this, every streaming delta (summaryDelta, edgeCasesDelta, etc.)
+  // triggers a full risk map recomputation + DOM scan ~60 times/sec.
+  let prevFileReviews = initialState.fileReviews;
+
+  // Subscribe to store — update only when fileReviews reference changes
+  const unsubscribe = useReviewStore.subscribe((state) => {
+    if (state.fileReviews === prevFileReviews) return;
+    prevFileReviews = state.fileReviews;
+
+    const newMap = computeRiskMap(state.fileReviews);
+    currentRiskMap = newMap;
+    debouncedUpdate();
+  });
 
   // MutationObserver for lazy-loaded file tree rows
   const observer = new MutationObserver(debouncedUpdate);
@@ -211,8 +220,11 @@ export function startRiskInjection(isDarkMode: boolean, signal?: AbortSignal): (
     }
   }
 
-  // Periodic rescan for virtual scrolling
-  const rescanInterval = setInterval(update, 3000);
+  // Periodic rescan for virtual scrolling — skipped in critical health
+  const rescanInterval = setInterval(() => {
+    if (getHealthLevel() === 'critical') return;
+    update();
+  }, 3000);
 
   // Visibility change handler
   const visibilityHandler = () => {

@@ -5,9 +5,10 @@
 // useTheme() so they adapt automatically when GitLab is in dark mode.
 // ---------------------------------------------------------------------------
 
-import { useState, useCallback, useMemo } from 'react';
-import { Settings, RefreshCw } from 'lucide-react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { Settings, RefreshCw, Play, List, Presentation } from 'lucide-react';
 import { useReview } from '@/hooks/use-review';
+import { useReviewStore } from '@/services/review/review-store';
 import { useGitLabContext } from '@/hooks/use-gitlab-context';
 import { useSettings } from '@/hooks/use-settings';
 import { useTheme } from '@/components/ThemeContext';
@@ -16,6 +17,13 @@ import { OttoLogo } from '@/components/OttoLogo';
 import { Markdown } from '@/components/Markdown';
 import { RelatedFilesPanel } from './RelatedFilesPanel';
 import { EdgeCaseAnalysis } from './EdgeCaseAnalysis';
+import { TrustBadge } from './TrustBadge';
+import { BehavioralDeltaPanel } from './BehavioralDeltaPanel';
+import { AdversarialTestsPanel } from './AdversarialTestsPanel';
+import { ContractsPanel } from './ContractsPanel';
+import { GuidedReviewPanel } from '@/components/guided-review/GuidedReviewPanel';
+import type { ToggleableFeature, ReviewMode } from '@/types/settings';
+import type { ReviewTask } from '@/services/review/review-types';
 
 export function MrOverviewPanel() {
   const review = useReview();
@@ -26,22 +34,110 @@ export function MrOverviewPanel() {
   const [showEdgeCases, setShowEdgeCases] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [showAcValidation, setShowAcValidation] = useState(true); // Open by default — high value
+  const [showBehavioralDelta, setShowBehavioralDelta] = useState(true); // Open by default — high value
+  const [showAdversarialTests, setShowAdversarialTests] = useState(false);
+  const [showContracts, setShowContracts] = useState(false);
+
+  // Review mode — persisted in settings, with local override for instant toggle
+  const [modeOverride, setModeOverride] = useState<ReviewMode | null>(null);
+  const reviewMode: ReviewMode = modeOverride ?? settings.preferences.reviewMode ?? 'default';
+
+  const handleToggleMode = useCallback((mode: ReviewMode) => {
+    setModeOverride(mode);
+    // Persist to settings in the background — don't block the UI
+    const updated = {
+      ...settings,
+      preferences: { ...settings.preferences, reviewMode: mode },
+    };
+    sendMessage({ type: 'SAVE_SETTINGS', payload: updated });
+  }, [settings]);
+
+  // Collapse/expand GitLab's diff list based on review mode
+  useEffect(() => {
+    const isGuidedActive = reviewMode === 'guided' && review.status === 'complete';
+    // Find all direct children of .diff-files-holder except our own container
+    const holder = document.querySelector('.diff-files-holder');
+    if (!holder) return;
+
+    const children = holder.children;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i] as HTMLElement;
+      // Skip our own injected elements — WXT creates a custom element
+      // named <otto-overview> as the shadow host (from name: 'otto-overview')
+      const tag = child.tagName.toLowerCase();
+      if (tag === 'otto-overview' || tag === 'otto-chat') continue;
+
+      if (isGuidedActive) {
+        child.dataset.ottoCollapsed = child.style.display || '';
+        child.style.display = 'none';
+      } else if (child.dataset.ottoCollapsed !== undefined) {
+        child.style.display = child.dataset.ottoCollapsed;
+        delete child.dataset.ottoCollapsed;
+      }
+    }
+
+    // Cleanup: restore on unmount
+    return () => {
+      if (!holder) return;
+      const children = holder.children;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i] as HTMLElement;
+        if (child.dataset.ottoCollapsed !== undefined) {
+          child.style.display = child.dataset.ottoCollapsed;
+          delete child.dataset.ottoCollapsed;
+        }
+      }
+    };
+  }, [reviewMode, review.status]);
 
   const handleStartReview = useCallback(() => {
-    const tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'> = ['summary', 'codeReview', 'edgeCases'];
+    const enabled = settings.preferences.enabledFeatures;
+    const allTasks: ReviewTask[] = ['summary', 'codeReview', 'edgeCases'];
     if (gitlabContext?.isConfigured) {
-      tasks.push('relatedFiles');
+      allTasks.push('relatedFiles');
     }
+    // Include verification tasks if enabled
+    if (enabled.adversarialTests) allTasks.push('adversarialTests');
+    if (enabled.contracts) allTasks.push('contracts');
+    if (enabled.behavioralDelta) allTasks.push('behavioralDelta');
+    // Filter to only enabled features (core review tasks use !== false for backwards compat)
+    const tasks = allTasks.filter((t) => enabled[t as keyof typeof enabled] !== false);
+    if (tasks.length === 0) return;
     review.startReview(tasks);
-  }, [review, gitlabContext]);
+  }, [review, gitlabContext, settings]);
 
   const handleRegenerate = useCallback(() => {
-    const tasks: Array<'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles'> = ['summary', 'codeReview', 'edgeCases'];
+    const enabled = settings.preferences.enabledFeatures;
+    const allTasks: ReviewTask[] = ['summary', 'codeReview', 'edgeCases'];
     if (gitlabContext?.isConfigured) {
-      tasks.push('relatedFiles');
+      allTasks.push('relatedFiles');
     }
+    if (enabled.adversarialTests) allTasks.push('adversarialTests');
+    if (enabled.contracts) allTasks.push('contracts');
+    if (enabled.behavioralDelta) allTasks.push('behavioralDelta');
+    const tasks = allTasks.filter((t) => enabled[t as keyof typeof enabled] !== false);
+    if (tasks.length === 0) return;
     review.regenerateReview(tasks);
-  }, [review, gitlabContext]);
+  }, [review, gitlabContext, settings]);
+
+  /** Run a single disabled feature on-demand without resetting existing results. */
+  const handleRunFeature = useCallback((feature: ToggleableFeature) => {
+    // These are all valid ReviewTask types that can be run ad-hoc
+    const runnableFeatures: ReviewTask[] = [
+      'summary', 'codeReview', 'edgeCases', 'relatedFiles',
+      'adversarialTests', 'contracts', 'behavioralDelta',
+    ];
+    if (runnableFeatures.includes(feature as ReviewTask)) {
+      const currentStatus = useReviewStore.getState().status;
+      if (currentStatus === 'idle') {
+        review.startReview([feature as ReviewTask]);
+      } else {
+        review.retryTasks([feature as ReviewTask]);
+      }
+    }
+    // acValidation can't be triggered ad-hoc — it runs automatically when
+    // tickets with AC exist during a review. The disabled row is informational.
+  }, [review]);
 
   const handleOpenSettings = useCallback(() => {
     sendMessage({ type: 'OPEN_OPTIONS' });
@@ -55,6 +151,7 @@ export function MrOverviewPanel() {
   const isComplete = review.status === 'complete';
   const hasError = review.status === 'error';
   const hasAiConfig = !!settings.ai.baseUrl;
+  const enabled = settings.preferences.enabledFeatures;
 
   if (isLoading) {
     return (
@@ -105,6 +202,59 @@ export function MrOverviewPanel() {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* Mode toggle — only when review is complete */}
+          {isComplete && (
+            <div style={{
+              display: 'inline-flex',
+              borderRadius: '6px',
+              border: `1px solid ${theme.borderSubtle}`,
+              overflow: 'hidden',
+            }}>
+              <button
+                onClick={() => handleToggleMode('default')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 10px',
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: reviewMode === 'default'
+                    ? (theme.isDark ? '#1e3a5f' : '#eff6ff')
+                    : 'transparent',
+                  color: reviewMode === 'default' ? theme.brand : theme.textMuted,
+                }}
+                title="Standard diff view"
+              >
+                <List size={12} />
+                Default
+              </button>
+              <button
+                onClick={() => handleToggleMode('guided')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 10px',
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  border: 'none',
+                  borderLeft: `1px solid ${theme.borderSubtle}`,
+                  cursor: 'pointer',
+                  background: reviewMode === 'guided'
+                    ? (theme.isDark ? '#1e3a5f' : '#eff6ff')
+                    : 'transparent',
+                  color: reviewMode === 'guided' ? theme.brand : theme.textMuted,
+                }}
+                title="Guided slide-by-slide review"
+              >
+                <Presentation size={12} />
+                Guided
+              </button>
+            </div>
+          )}
           {isIdle && (
             <button onClick={handleStartReview} style={s.primaryButton}>
               Review MR
@@ -162,6 +312,9 @@ export function MrOverviewPanel() {
             <ProgressItem label="Edge Cases" status={review.progress.edgeCases.status} theme={theme} />
             <ProgressItem label="Related" status={review.progress.relatedFiles.status} theme={theme} />
             <ProgressItem label="Recent MRs" status={review.progress.fileActivity.status} theme={theme} />
+            <ProgressItem label="Tests" status={review.progress.adversarialTests.status} theme={theme} />
+            <ProgressItem label="Contracts" status={review.progress.contracts.status} theme={theme} />
+            <ProgressItem label="Behavior" status={review.progress.behavioralDelta.status} theme={theme} />
           </div>
           {review.progressMessage && (
             <div style={{
@@ -179,9 +332,15 @@ export function MrOverviewPanel() {
       )}
 
       {/* Summary */}
-      {(review.summaryDelta || review.summary) && (
+      {(review.summaryDelta || review.summary || review.progress.summary.status === 'error') && (
         <div style={s.section}>
           <div style={s.sectionHeader}>Summary</div>
+          {review.progress.summary.status === 'error' && !review.summary && (
+            <div style={{ fontSize: '12px', color: theme.error, padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{review.progress.summary.error || 'Summary generation failed.'}</span>
+              <button onClick={() => review.retryTasks(['summary'])} style={s.retryButton}>Retry</button>
+            </div>
+          )}
           {review.summary ? (
             <div style={{ fontSize: '13px' }}>
               <Markdown content={review.summary.overview} compact />
@@ -281,8 +440,18 @@ export function MrOverviewPanel() {
         </div>
       )}
 
+      {/* Code Review error/retry — shown when file reviews fail */}
+      {review.progress.codeReview.status === 'error' && review.fileReviews.length === 0 && (
+        <div style={s.section}>
+          <div style={{ fontSize: '12px', color: theme.error, padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{review.progress.codeReview.error || 'File reviews failed.'}</span>
+            <button onClick={() => review.retryTasks(['codeReview'])} style={s.retryButton}>Retry</button>
+          </div>
+        </div>
+      )}
+
       {/* Linked Tickets */}
-      {review.ticketKeys.length > 0 && review.ticketContext && (
+      {(reviewMode === 'default' || !isComplete) && review.ticketKeys.length > 0 && review.ticketContext && (
         <div style={s.section}>
           <div style={s.sectionHeader}>
             Linked Tickets ({review.ticketKeys.join(', ')})
@@ -294,7 +463,7 @@ export function MrOverviewPanel() {
       )}
 
       {/* Acceptance Criteria Validation */}
-      {review.acValidation && review.acValidation.results.length > 0 && (
+      {(reviewMode === 'default' || !isComplete) && review.acValidation && review.acValidation.results.length > 0 && (
         <div style={s.section}>
           <button onClick={() => setShowAcValidation(!showAcValidation)} style={s.collapsibleHeader}>
             <span>
@@ -310,7 +479,7 @@ export function MrOverviewPanel() {
       )}
 
       {/* Recent File Activity (collapsible) */}
-      {review.fileActivity && review.fileActivity.fileActivities.length > 0 && (
+      {(reviewMode === 'default' || !isComplete) && review.fileActivity && review.fileActivity.fileActivities.length > 0 && (
         <div style={s.section}>
           <button onClick={() => setShowActivity(!showActivity)} style={s.collapsibleHeader}>
             <span>
@@ -324,7 +493,7 @@ export function MrOverviewPanel() {
       )}
 
       {/* Related Files (collapsible) */}
-      {(review.relatedFiles.length > 0 || review.progress.relatedFiles?.status === 'error') && (
+      {(reviewMode === 'default' || !isComplete) && (review.relatedFiles.length > 0 || review.progress.relatedFiles?.status === 'error') && (
         <div style={s.section}>
           <button onClick={() => setShowRelated(!showRelated)} style={s.collapsibleHeader}>
             <span>
@@ -354,7 +523,7 @@ export function MrOverviewPanel() {
       )}
 
       {/* Edge Cases (collapsible) */}
-      {(review.edgeCases.length > 0 || review.edgeCasesDelta || review.progress.edgeCases.status === 'error') && (
+      {(reviewMode === 'default' || !isComplete) && (review.edgeCases.length > 0 || review.edgeCasesDelta || review.progress.edgeCases.status === 'error') && (
         <div style={s.section}>
           <button onClick={() => setShowEdgeCases(!showEdgeCases)} style={s.collapsibleHeader}>
             <span>
@@ -388,6 +557,146 @@ export function MrOverviewPanel() {
           )}
         </div>
       )}
+
+      {/* Disabled feature placeholders — shown when a feature is turned off
+           in settings but the review is idle or complete. Clicking runs it ad-hoc. */}
+      {(reviewMode === 'default' || !isComplete) && (isIdle || isComplete) && (
+        <>
+          {enabled.summary === false && !review.summary && (
+            <DisabledFeatureRow label="Summary" feature="summary" onRun={handleRunFeature} theme={theme} />
+          )}
+          {enabled.codeReview === false && review.fileReviews.length === 0 && (
+            <DisabledFeatureRow label="Code Review" feature="codeReview" onRun={handleRunFeature} theme={theme} />
+          )}
+          {enabled.edgeCases === false && review.edgeCases.length === 0 && (
+            <DisabledFeatureRow label="Edge Cases" feature="edgeCases" onRun={handleRunFeature} theme={theme} />
+          )}
+          {enabled.relatedFiles === false && review.relatedFiles.length === 0 && (
+            <DisabledFeatureRow label="Related Files" feature="relatedFiles" onRun={handleRunFeature} theme={theme} />
+          )}
+          {enabled.acValidation === false && !review.acValidation && (
+            <DisabledFeatureRow label="AC Validation" feature="acValidation" onRun={handleRunFeature} theme={theme} />
+          )}
+          {enabled.adversarialTests === false && !review.verification.adversarialTests && (
+            <DisabledFeatureRow label="Stress Tests" feature="adversarialTests" onRun={handleRunFeature} theme={theme} />
+          )}
+          {enabled.contracts === false && !review.verification.contracts && (
+            <DisabledFeatureRow label="Contracts" feature="contracts" onRun={handleRunFeature} theme={theme} />
+          )}
+          {enabled.behavioralDelta === false && !review.verification.behavioralDelta && (
+            <DisabledFeatureRow label="Behavioral Delta" feature="behavioralDelta" onRun={handleRunFeature} theme={theme} />
+          )}
+        </>
+      )}
+
+      {/* Verification Trust Assessment — cross-cutting, shown above all verification sections */}
+      {(reviewMode === 'default' || !isComplete) && review.verification.trust && (
+        <div style={s.section}>
+          <TrustBadge trust={review.verification.trust} />
+        </div>
+      )}
+
+      {/* Behavioral Delta (collapsible) — shows first among verification, highest reviewer value */}
+      {(reviewMode === 'default' || !isComplete) && (review.verification.behavioralDelta || review.behavioralDeltaDelta || review.progress.behavioralDelta.status === 'error') && (
+        <div style={s.section}>
+          <button onClick={() => setShowBehavioralDelta(!showBehavioralDelta)} style={s.collapsibleHeader}>
+            <span>
+              {showBehavioralDelta ? '▾' : '▸'} Behavioral Delta
+              {review.verification.behavioralDelta
+                ? ` (${review.verification.behavioralDelta.changed.length} changed, ${review.verification.behavioralDelta.preserved.length} preserved${review.verification.behavioralDelta.unexpected.length > 0 ? `, ${review.verification.behavioralDelta.unexpected.length} unexpected` : ''})`
+                : review.progress.behavioralDelta.status === 'error'
+                  ? ' (failed)'
+                  : review.behavioralDeltaDelta ? ' (analyzing...)' : ''}
+            </span>
+          </button>
+          {showBehavioralDelta && review.verification.behavioralDelta && (
+            <BehavioralDeltaPanel data={review.verification.behavioralDelta} />
+          )}
+          {showBehavioralDelta && review.progress.behavioralDelta.status === 'error' && review.progress.behavioralDelta.error && (
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{review.progress.behavioralDelta.error}</span>
+              <button onClick={() => review.retryTasks(['behavioralDelta'])} style={s.retryButton}>Retry</button>
+            </div>
+          )}
+          {showBehavioralDelta && !review.verification.behavioralDelta && review.behavioralDeltaDelta && (
+            <div style={{ fontSize: '13px', marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+              <Markdown content={review.behavioralDeltaDelta} compact />
+              <span style={{ color: theme.brand }}>|</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Adversarial Tests (collapsible) */}
+      {(reviewMode === 'default' || !isComplete) && (review.verification.adversarialTests || review.adversarialTestsDelta || review.progress.adversarialTests.status === 'error') && (
+        <div style={s.section}>
+          <button onClick={() => setShowAdversarialTests(!showAdversarialTests)} style={s.collapsibleHeader}>
+            <span>
+              {showAdversarialTests ? '▾' : '▸'} Stress Tests
+              {review.verification.adversarialTests
+                ? ` (${review.verification.adversarialTests.totalTests} tests)`
+                : review.progress.adversarialTests.status === 'error'
+                  ? ' (failed)'
+                  : review.adversarialTestsDelta ? ' (generating...)' : ''}
+            </span>
+          </button>
+          {showAdversarialTests && review.verification.adversarialTests && (
+            <AdversarialTestsPanel data={review.verification.adversarialTests} trust={review.verification.trust} />
+          )}
+          {showAdversarialTests && review.progress.adversarialTests.status === 'error' && review.progress.adversarialTests.error && (
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{review.progress.adversarialTests.error}</span>
+              <button onClick={() => review.retryTasks(['adversarialTests'])} style={s.retryButton}>Retry</button>
+            </div>
+          )}
+          {showAdversarialTests && !review.verification.adversarialTests && review.adversarialTestsDelta && (
+            <div style={{ fontSize: '13px', marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+              <Markdown content={review.adversarialTestsDelta} compact />
+              <span style={{ color: theme.brand }}>|</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Contracts (collapsible) */}
+      {(reviewMode === 'default' || !isComplete) && (review.verification.contracts || review.contractsDelta || review.progress.contracts.status === 'error') && (
+        <div style={s.section}>
+          <button onClick={() => setShowContracts(!showContracts)} style={s.collapsibleHeader}>
+            <span>
+              {showContracts ? '▾' : '▸'} Inferred Contracts
+              {review.verification.contracts
+                ? ` (${review.verification.contracts.contracts.length} functions)`
+                : review.progress.contracts.status === 'error'
+                  ? ' (failed)'
+                  : review.contractsDelta ? ' (inferring...)' : ''}
+            </span>
+          </button>
+          {showContracts && review.verification.contracts && (
+            <ContractsPanel data={review.verification.contracts} />
+          )}
+          {showContracts && review.progress.contracts.status === 'error' && review.progress.contracts.error && (
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{review.progress.contracts.error}</span>
+              <button onClick={() => review.retryTasks(['contracts'])} style={s.retryButton}>Retry</button>
+            </div>
+          )}
+          {showContracts && !review.verification.contracts && review.contractsDelta && (
+            <div style={{ fontSize: '13px', marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+              <Markdown content={review.contractsDelta} compact />
+              <span style={{ color: theme.brand }}>|</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Guided Review Panel — replaces collapsible sections when in guided mode */}
+      {reviewMode === 'guided' && isComplete && (
+        <GuidedReviewPanel
+          hostId={gitlabContext?.host?.id ?? null}
+          projectId={review.mrContext?.projectId ?? null}
+          mrIid={review.mrContext?.mrIid ?? 0}
+        />
+      )}
     </div>
   );
 }
@@ -398,6 +707,74 @@ export function MrOverviewPanel() {
 
 import type { OttoTheme } from '@/components/ThemeContext';
 import type { FileActivityData, AcValidationData, AcValidationStatus } from '@/types/review';
+
+/**
+ * Disabled feature row — shows when a feature is turned off in settings.
+ * Clicking the row runs the feature ad-hoc without changing settings.
+ */
+function DisabledFeatureRow({
+  label,
+  feature,
+  onRun,
+  theme,
+}: {
+  label: string;
+  feature: ToggleableFeature;
+  onRun: (feature: ToggleableFeature) => void;
+  theme: OttoTheme;
+}) {
+  return (
+    <div style={{
+      padding: '8px 14px',
+      borderBottom: `1px solid ${theme.borderSubtle}`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <span style={{
+          fontSize: '12px',
+          fontWeight: 600,
+          textTransform: 'uppercase' as const,
+          letterSpacing: '0.05em',
+          color: theme.textMuted,
+        }}>
+          {label}
+        </span>
+        <span style={{
+          fontSize: '10px',
+          padding: '1px 5px',
+          borderRadius: '3px',
+          background: theme.bgMuted,
+          color: theme.textMuted,
+          fontWeight: 500,
+        }}>
+          off
+        </span>
+      </div>
+      <button
+        onClick={() => onRun(feature)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '3px 8px',
+          borderRadius: '4px',
+          background: 'transparent',
+          color: theme.brand,
+          border: `1px solid ${theme.borderSubtle}`,
+          fontSize: '11px',
+          fontWeight: 500,
+          cursor: 'pointer',
+        }}
+        title={`Run ${label} once (feature is disabled in settings)`}
+      >
+        <Play size={10} />
+        Run
+      </button>
+    </div>
+  );
+}
 
 function ProgressItem({ label, status, theme }: { label: string; status: string; theme: OttoTheme }) {
   const color = status === 'complete' ? theme.success

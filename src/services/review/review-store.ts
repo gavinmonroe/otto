@@ -28,11 +28,21 @@ import type {
   FileActivityData,
   AcValidationData,
 } from '@/types/review';
+import type {
+  VerificationData,
+  AdversarialTestData,
+  ContractData,
+  BehavioralDeltaData,
+  TrustAssessment,
+  CiExecutionResult,
+} from '@/types/verification';
+import { EMPTY_VERIFICATION_DATA } from '@/types/verification';
 import type { FollowUpAnalysis, FollowUpStatus } from '@/types/followup';
 import type { ReviewProgress, ReviewTask } from './review-types';
 import { recordSignal } from './reviewer-prefs';
-import { INITIAL_REVIEW_PROGRESS } from './review-types';
+import { INITIAL_REVIEW_PROGRESS, INITIAL_TASK_PROGRESS } from './review-types';
 import type { CachedReview } from './review-cache';
+import type { HealthLevel } from './health-monitor';
 
 type ReviewState = {
   // MR context (set once when the page loads)
@@ -67,6 +77,12 @@ type ReviewState = {
   // Acceptance criteria validation
   acValidation: AcValidationData | null;
 
+  // Verification (adversarial tests, contracts, behavioral delta, trust)
+  verification: VerificationData;
+  adversarialTestsDelta: string;   // Streaming accumulator
+  contractsDelta: string;          // Streaming accumulator
+  behavioralDeltaDelta: string;    // Streaming accumulator
+
   // Timestamps
   startedAt: number | null;
   completedAt: number | null;
@@ -75,6 +91,9 @@ type ReviewState = {
   followUps: Record<string, FollowUpAnalysis>;
   followUpStatus: Record<string, FollowUpStatus>;
   followUpErrors: Record<string, string>;
+
+  // Tab health level (set by health monitor on transitions only)
+  healthLevel: HealthLevel;
 };
 
 type ReviewActions = {
@@ -90,6 +109,9 @@ type ReviewActions = {
   completeReview: () => void;
   setError: (error: string) => void;
   setProgressMessage: (message: string | null) => void;
+  /** Set status without resetting results. Used by queue subscription to show
+   *  loading state while preserving any partial data from a prior cache load. */
+  setStatus: (status: ReviewStatus) => void;
 
   // Summary
   appendSummaryDelta: (content: string) => void;
@@ -116,6 +138,17 @@ type ReviewActions = {
   // Acceptance criteria validation
   setAcValidation: (data: AcValidationData) => void;
 
+  // Verification
+  setVerificationGenerating: () => void;
+  setAdversarialTests: (data: AdversarialTestData) => void;
+  appendAdversarialTestsDelta: (content: string) => void;
+  setContracts: (data: ContractData) => void;
+  appendContractsDelta: (content: string) => void;
+  setBehavioralDelta: (data: BehavioralDeltaData) => void;
+  appendBehavioralDeltaDelta: (content: string) => void;
+  setTrustAssessment: (trust: TrustAssessment) => void;
+  setCiExecution: (result: CiExecutionResult) => void;
+
   // Task progress
   setTaskStatus: (task: ReviewTask, status: ReviewProgress[ReviewTask]['status'], error?: string) => void;
 
@@ -127,6 +160,9 @@ type ReviewActions = {
   setFollowUpStatus: (commentId: string, status: FollowUpStatus, error?: string) => void;
   clearFollowUp: (commentId: string) => void;
   clearAllFollowUps: () => void;
+
+  // Health
+  setHealthLevel: (level: HealthLevel) => void;
 };
 
 const INITIAL_STATE: ReviewState = {
@@ -146,11 +182,16 @@ const INITIAL_STATE: ReviewState = {
   ticketKeys: [],
   fileActivity: null,
   acValidation: null,
+  verification: { ...EMPTY_VERIFICATION_DATA },
+  adversarialTestsDelta: '',
+  contractsDelta: '',
+  behavioralDeltaDelta: '',
   startedAt: null,
   completedAt: null,
   followUps: {},
   followUpStatus: {},
   followUpErrors: {},
+  healthLevel: 'normal',
 };
 
 export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) => ({
@@ -158,24 +199,54 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
 
   setMrContext: (context) => set({ mrContext: context }),
 
-  reset: () => set({ ...INITIAL_STATE, mrContext: get().mrContext }),
+  reset: () => set({ ...INITIAL_STATE, mrContext: get().mrContext, healthLevel: get().healthLevel }),
 
   hydrateFromCache: (cached) => {
-    const allComplete = { ...INITIAL_REVIEW_PROGRESS };
-    for (const key of Object.keys(allComplete) as ReviewTask[]) {
-      allComplete[key] = { ...allComplete[key], status: 'complete' };
+    const progress = { ...INITIAL_REVIEW_PROGRESS };
+
+    // Only mark tasks as complete if they have actual cached data.
+    // This is critical for partial caches saved mid-review — tasks that
+    // haven't completed yet should stay idle, not be marked complete.
+    if (cached.summary) {
+      progress.summary = { ...progress.summary, status: 'complete' };
     }
     if (cached.fileReviews.length > 0) {
-      allComplete.codeReview = {
-        ...allComplete.codeReview,
+      progress.codeReview = {
+        ...progress.codeReview,
+        status: 'complete',
         filesTotal: cached.fileReviews.length,
         filesComplete: cached.fileReviews.length,
       };
     }
+    if (cached.edgeCases.length > 0) {
+      progress.edgeCases = { ...progress.edgeCases, status: 'complete' };
+    }
+    if (cached.relatedFiles.length > 0) {
+      progress.relatedFiles = { ...progress.relatedFiles, status: 'complete' };
+    }
+    if (cached.fileActivity) {
+      progress.fileActivity = { ...progress.fileActivity, status: 'complete' };
+    }
+
+    // Verification tasks — only if data exists
+    const v = cached.verification;
+    if (v?.adversarialTests) {
+      progress.adversarialTests = { ...progress.adversarialTests, status: 'complete' };
+    }
+    if (v?.contracts) {
+      progress.contracts = { ...progress.contracts, status: 'complete' };
+    }
+    if (v?.behavioralDelta) {
+      progress.behavioralDelta = { ...progress.behavioralDelta, status: 'complete' };
+    }
+
+    // Determine overall status: complete only if all core tasks have data
+    const isFullyComplete = !!(cached.summary && cached.fileReviews.length > 0);
+
     set({
-      status: 'complete',
+      status: isFullyComplete ? 'complete' : get().status,
       error: null,
-      progress: allComplete,
+      progress,
       summary: cached.summary,
       summaryDelta: '',
       fileReviews: cached.fileReviews,
@@ -187,6 +258,10 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
       ticketKeys: cached.ticketKeys ?? [],
       fileActivity: cached.fileActivity ?? null,
       acValidation: cached.acValidation ?? null,
+      verification: cached.verification ?? { ...EMPTY_VERIFICATION_DATA },
+      adversarialTestsDelta: '',
+      contractsDelta: '',
+      behavioralDeltaDelta: '',
       startedAt: cached.timestamp,
       completedAt: cached.timestamp,
     });
@@ -221,6 +296,7 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
   setError: (error) => set({ status: 'error', error }),
 
   setProgressMessage: (message) => set({ progressMessage: message }),
+  setStatus: (status) => set({ status }),
 
   // Summary streaming
   appendSummaryDelta: (content) => set((state) => ({
@@ -314,6 +390,70 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
 
   setAcValidation: (data) => set({ acValidation: data }),
 
+  // Verification actions
+  setVerificationGenerating: () => set((state) => ({
+    verification: { ...state.verification, status: 'generating' },
+  })),
+
+  setAdversarialTests: (data) => set((state) => ({
+    verification: { ...state.verification, adversarialTests: data },
+    adversarialTestsDelta: '',
+    progress: {
+      ...state.progress,
+      adversarialTests: { ...state.progress.adversarialTests, status: 'complete' },
+    },
+  })),
+
+  appendAdversarialTestsDelta: (content) => set((state) => ({
+    adversarialTestsDelta: state.adversarialTestsDelta + content,
+    progress: {
+      ...state.progress,
+      adversarialTests: { ...state.progress.adversarialTests, status: 'streaming' },
+    },
+  })),
+
+  setContracts: (data) => set((state) => ({
+    verification: { ...state.verification, contracts: data },
+    contractsDelta: '',
+    progress: {
+      ...state.progress,
+      contracts: { ...state.progress.contracts, status: 'complete' },
+    },
+  })),
+
+  appendContractsDelta: (content) => set((state) => ({
+    contractsDelta: state.contractsDelta + content,
+    progress: {
+      ...state.progress,
+      contracts: { ...state.progress.contracts, status: 'streaming' },
+    },
+  })),
+
+  setBehavioralDelta: (data) => set((state) => ({
+    verification: { ...state.verification, behavioralDelta: data },
+    behavioralDeltaDelta: '',
+    progress: {
+      ...state.progress,
+      behavioralDelta: { ...state.progress.behavioralDelta, status: 'complete' },
+    },
+  })),
+
+  appendBehavioralDeltaDelta: (content) => set((state) => ({
+    behavioralDeltaDelta: state.behavioralDeltaDelta + content,
+    progress: {
+      ...state.progress,
+      behavioralDelta: { ...state.progress.behavioralDelta, status: 'streaming' },
+    },
+  })),
+
+  setTrustAssessment: (trust) => set((state) => ({
+    verification: { ...state.verification, trust, status: 'complete', generatedAt: Date.now() },
+  })),
+
+  setCiExecution: (result) => set((state) => ({
+    verification: { ...state.verification, execution: result, executedAt: Date.now() },
+  })),
+
   // Task progress — also clears delta for the failed task
   setTaskStatus: (task, status, error) => set((state) => {
     const updates: Partial<ReviewState> = {
@@ -326,6 +466,9 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
     if (status === 'error') {
       if (task === 'edgeCases') updates.edgeCasesDelta = '';
       if (task === 'summary') updates.summaryDelta = '';
+      if (task === 'adversarialTests') updates.adversarialTestsDelta = '';
+      if (task === 'contracts') updates.contractsDelta = '';
+      if (task === 'behavioralDelta') updates.behavioralDeltaDelta = '';
     }
     return updates;
   }),
@@ -390,4 +533,6 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
     followUpStatus: {},
     followUpErrors: {},
   }),
+
+  setHealthLevel: (level) => set({ healthLevel: level }),
 }));

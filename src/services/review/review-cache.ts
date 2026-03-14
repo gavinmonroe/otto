@@ -25,6 +25,7 @@ import type {
   FileActivityData,
   AcValidationData,
 } from '@/types/review';
+import type { VerificationData } from '@/types/verification';
 
 const CACHE_PREFIX = 'otto_review:';
 const MAX_CACHED_REVIEWS = 50;
@@ -50,6 +51,8 @@ export type CachedReview = {
   fileActivity?: FileActivityData | null;
   /** Acceptance criteria validation results. Null if no tickets with AC. */
   acValidation?: AcValidationData | null;
+  /** Verification data (adversarial tests, contracts, behavioral delta, trust). */
+  verification?: VerificationData | null;
 };
 
 /**

@@ -19,6 +19,9 @@ import { DEFAULT_RELATED_FILES_PROMPT } from '@/services/ai/prompts/related-file
 import { DEFAULT_FOLLOW_UP_PROMPT } from '@/services/ai/prompts/followup';
 import { DEFAULT_CHAT_PROMPT } from '@/services/ai/prompts/chat';
 import { DEFAULT_AC_VALIDATION_PROMPT } from '@/services/ai/prompts/ac-validation';
+import { DEFAULT_ADVERSARIAL_TESTS_PROMPT } from '@/services/ai/prompts/adversarial-tests';
+import { DEFAULT_CONTRACTS_PROMPT } from '@/services/ai/prompts/contracts';
+import { DEFAULT_BEHAVIORAL_DELTA_PROMPT } from '@/services/ai/prompts/behavioral-delta';
 
 type CustomPromptsFormProps = {
   settings: OttoSettings;
@@ -33,6 +36,9 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   followUp: 'Comment Follow-Up',
   chat: 'MR Chat Q&A',
   acValidation: 'AC Validation',
+  adversarialTests: 'Adversarial Tests',
+  contracts: 'Contract Inference',
+  behavioralDelta: 'Behavioral Delta',
 };
 
 const DEFAULT_PROMPTS: Record<AiTaskType, string> = {
@@ -43,6 +49,9 @@ const DEFAULT_PROMPTS: Record<AiTaskType, string> = {
   followUp: DEFAULT_FOLLOW_UP_PROMPT,
   chat: DEFAULT_CHAT_PROMPT,
   acValidation: DEFAULT_AC_VALIDATION_PROMPT,
+  adversarialTests: DEFAULT_ADVERSARIAL_TESTS_PROMPT,
+  contracts: DEFAULT_CONTRACTS_PROMPT,
+  behavioralDelta: DEFAULT_BEHAVIORAL_DELTA_PROMPT,
 };
 
 export function CustomPromptsForm({ settings, onUpdate }: CustomPromptsFormProps) {

@@ -27,6 +27,16 @@ import type {
   AcValidationResult,
   AcCriterionResult,
 } from '@/types/review';
+import type {
+  PropertyTest,
+  PropertyTestResult,
+  FileTestData,
+  AdversarialTestData,
+  FunctionContract,
+  ContractData,
+  BehaviorEntry,
+  BehavioralDeltaData,
+} from '@/types/verification';
 import type { Result } from '@/types/messages';
 import { chatCompletion, chatCompletionStream } from './ai-client';
 import type { AiClientConfig, ChatMessage, ToolDefinition } from './ai-client';
@@ -43,6 +53,12 @@ import type { FollowUpAnalysis, FollowUpAction } from '@/types/followup';
 import { buildChatPrompt } from './prompts/chat';
 import { buildAcValidationPrompt } from './prompts/ac-validation';
 import type { AcValidationInput } from './prompts/ac-validation';
+import { buildAdversarialTestPrompt } from './prompts/adversarial-tests';
+import type { AdversarialTestInput } from './prompts/adversarial-tests';
+import { buildContractPrompt } from './prompts/contracts';
+import type { ContractInput } from './prompts/contracts';
+import { buildBehavioralDeltaPrompt } from './prompts/behavioral-delta';
+import type { BehavioralDeltaInput } from './prompts/behavioral-delta';
 import type { ChatReviewContext } from '@/types/messages';
 import type { ChatMessage as UiChatMessage, SuggestedQuestion } from '@/types/chat';
 import { generateId } from '@/lib/utils';
@@ -708,6 +724,309 @@ export async function validateAcceptanceCriteria(
       ticketKey: input.ticketKey,
       criteria,
       summary: parsed.data.summary || `${criteria.filter((c) => c.status === 'satisfied').length} of ${criteria.length} criteria satisfied.`,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test Generation
+// ---------------------------------------------------------------------------
+
+type RawPropertyTest = {
+  property: string;
+  testCode: string;
+  targetFunction: string;
+  filePath: string;
+  lineRange: { start: number; end: number } | null;
+};
+
+/**
+ * Generate adversarial property-based tests for changed functions.
+ * Streams content deltas for real-time display, then parses into structured data.
+ */
+export async function generateAdversarialTests(
+  aiConfig: AiConfig,
+  input: AdversarialTestInput,
+  onDelta?: (content: string) => void,
+  signal?: AbortSignal,
+): Promise<Result<AdversarialTestData>> {
+  const messages = buildAdversarialTestPrompt(input, getCustomPrompt(aiConfig, 'adversarialTests'));
+  const config = getClientConfig(aiConfig);
+  const model = getModel(aiConfig, 'adversarialTests');
+  const temperature = getTemperature(aiConfig, 'adversarialTests');
+  const max_tokens = getMaxTokens(aiConfig, 'adversarialTests');
+
+  let fullText = '';
+
+  if (onDelta) {
+    try {
+      const stream = chatCompletionStream(config, { model, messages, temperature, max_tokens }, signal);
+      for await (const chunk of stream) {
+        fullText += chunk;
+        onDelta(chunk);
+      }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Adversarial test generation failed' };
+    }
+  } else {
+    const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
+    if (!result.ok) return result;
+    fullText = result.data.choices[0]?.message?.content || '';
+  }
+
+  const parsed = parseAiJson<RawPropertyTest[] | Record<string, RawPropertyTest[]>>(fullText, 'adversarial tests');
+  if (!parsed.ok) return parsed;
+
+  // Handle AI wrapping the array in an object
+  let rawTests: RawPropertyTest[];
+  if (Array.isArray(parsed.data)) {
+    rawTests = parsed.data;
+  } else if (typeof parsed.data === 'object' && parsed.data !== null) {
+    const values = Object.values(parsed.data);
+    const arr = values.find((v) => Array.isArray(v));
+    rawTests = arr ? arr : [];
+  } else {
+    rawTests = [];
+  }
+
+  // Transform into domain types, grouped by file
+  const testsById = new Map<string, PropertyTest[]>();
+  for (const raw of rawTests) {
+    // Validate required fields — AI may omit them
+    if (!raw.property || !raw.testCode || !raw.targetFunction || !raw.filePath) continue;
+    const test: PropertyTest = {
+      id: generateId(),
+      property: raw.property,
+      testCode: raw.testCode,
+      targetFunction: raw.targetFunction,
+      filePath: raw.filePath,
+      lineRange: raw.lineRange ?? null,
+    };
+    const existing = testsById.get(raw.filePath) || [];
+    existing.push(test);
+    testsById.set(raw.filePath, existing);
+  }
+
+  // Build per-file data with AI-reasoned results (no execution yet)
+  const files: FileTestData[] = [];
+  for (const [filePath, tests] of testsById) {
+    files.push({
+      filePath,
+      tests,
+      results: tests.map((t) => ({
+        testId: t.id,
+        status: 'not-run' as const,
+        iterations: null,
+        counterexample: null,
+        errorMessage: null,
+        aiReasoned: false,
+      })),
+    });
+  }
+
+  const totalTests = rawTests.length;
+
+  return {
+    ok: true,
+    data: {
+      files,
+      totalTests,
+      totalHeld: 0,
+      totalCounterexamples: 0,
+      totalErrors: 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Inference
+// ---------------------------------------------------------------------------
+
+type RawFunctionContract = {
+  functionName: string;
+  filePath: string;
+  lineRange: { start: number; end: number } | null;
+  preconditions: Array<{ human: string; code: string | null }>;
+  postconditions: Array<{ human: string; code: string | null }>;
+  invariants: Array<{ human: string; code: string | null }>;
+  verificationStatus: 'verified' | 'violation-possible' | 'unknown';
+  violationPath: string | null;
+};
+
+/**
+ * Infer contracts (preconditions, postconditions, invariants) for changed functions.
+ * Streams content deltas for real-time display, then parses into structured data.
+ */
+export async function generateContracts(
+  aiConfig: AiConfig,
+  input: ContractInput,
+  onDelta?: (content: string) => void,
+  signal?: AbortSignal,
+): Promise<Result<ContractData>> {
+  const messages = buildContractPrompt(input, getCustomPrompt(aiConfig, 'contracts'));
+  const config = getClientConfig(aiConfig);
+  const model = getModel(aiConfig, 'contracts');
+  const temperature = getTemperature(aiConfig, 'contracts');
+  const max_tokens = getMaxTokens(aiConfig, 'contracts');
+
+  let fullText = '';
+
+  if (onDelta) {
+    try {
+      const stream = chatCompletionStream(config, { model, messages, temperature, max_tokens }, signal);
+      for await (const chunk of stream) {
+        fullText += chunk;
+        onDelta(chunk);
+      }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Contract inference failed' };
+    }
+  } else {
+    const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
+    if (!result.ok) return result;
+    fullText = result.data.choices[0]?.message?.content || '';
+  }
+
+  const parsed = parseAiJson<RawFunctionContract[] | Record<string, RawFunctionContract[]>>(fullText, 'contracts');
+  if (!parsed.ok) return parsed;
+
+  // Handle AI wrapping the array in an object
+  let rawContracts: RawFunctionContract[];
+  if (Array.isArray(parsed.data)) {
+    rawContracts = parsed.data;
+  } else if (typeof parsed.data === 'object' && parsed.data !== null) {
+    const values = Object.values(parsed.data);
+    const arr = values.find((v) => Array.isArray(v));
+    rawContracts = arr ? arr : [];
+  } else {
+    rawContracts = [];
+  }
+
+  const contracts: FunctionContract[] = rawContracts
+    .filter((raw) => raw.functionName && raw.filePath) // Skip entries missing required fields
+    .map((raw) => ({
+      id: generateId(),
+      functionName: raw.functionName,
+      filePath: raw.filePath,
+      lineRange: raw.lineRange ?? null,
+      preconditions: (raw.preconditions || []).map((s) => ({ human: s.human || '', code: s.code ?? null })),
+      postconditions: (raw.postconditions || []).map((s) => ({ human: s.human || '', code: s.code ?? null })),
+      invariants: (raw.invariants || []).map((s) => ({ human: s.human || '', code: s.code ?? null })),
+      verificationStatus: (['verified', 'violation-possible', 'unknown'].includes(raw.verificationStatus)
+        ? raw.verificationStatus
+        : 'unknown') as FunctionContract['verificationStatus'],
+      violationPath: raw.violationPath || null,
+      aiReasoned: true,
+    }));
+
+  return {
+    ok: true,
+    data: {
+      contracts,
+      totalVerified: contracts.filter((c) => c.verificationStatus === 'verified').length,
+      totalViolations: contracts.filter((c) => c.verificationStatus === 'violation-possible').length,
+      totalUnknown: contracts.filter((c) => c.verificationStatus === 'unknown').length,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Behavioral Delta Analysis
+// ---------------------------------------------------------------------------
+
+type RawBehaviorEntry = {
+  description: string;
+  testScenario: string;
+  expectedOutcome: string;
+  filePaths: string[];
+  type: 'changed' | 'preserved' | 'unexpected';
+};
+
+type RawBehavioralDelta = {
+  summary: string;
+  changed: RawBehaviorEntry[];
+  preserved: RawBehaviorEntry[];
+  unexpected: RawBehaviorEntry[];
+};
+
+/**
+ * Analyze the behavioral delta of the MR — what changed, what was preserved,
+ * and what changed unexpectedly.
+ * Streams content deltas for real-time display, then parses into structured data.
+ */
+export async function generateBehavioralDelta(
+  aiConfig: AiConfig,
+  input: BehavioralDeltaInput,
+  onDelta?: (content: string) => void,
+  signal?: AbortSignal,
+): Promise<Result<BehavioralDeltaData>> {
+  const messages = buildBehavioralDeltaPrompt(input, getCustomPrompt(aiConfig, 'behavioralDelta'));
+  const config = getClientConfig(aiConfig);
+  const model = getModel(aiConfig, 'behavioralDelta');
+  const temperature = getTemperature(aiConfig, 'behavioralDelta');
+  const max_tokens = getMaxTokens(aiConfig, 'behavioralDelta');
+
+  let fullText = '';
+
+  if (onDelta) {
+    try {
+      const stream = chatCompletionStream(config, { model, messages, temperature, max_tokens }, signal);
+      for await (const chunk of stream) {
+        fullText += chunk;
+        onDelta(chunk);
+      }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Behavioral delta analysis failed' };
+    }
+  } else {
+    const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
+    if (!result.ok) return result;
+    fullText = result.data.choices[0]?.message?.content || '';
+  }
+
+  const parsed = parseAiJson<RawBehavioralDelta | Record<string, unknown>>(fullText, 'behavioral delta');
+  if (!parsed.ok) return parsed;
+
+  // Handle AI wrapping the response in an extra object (e.g., {"result": {...}})
+  let delta: RawBehavioralDelta;
+  const data = parsed.data;
+  if ('changed' in data || 'preserved' in data || 'unexpected' in data) {
+    delta = data as RawBehavioralDelta;
+  } else if (typeof data === 'object' && data !== null) {
+    // Find the first value that looks like a behavioral delta
+    const inner = Object.values(data).find(
+      (v) => v && typeof v === 'object' && ('changed' in v || 'preserved' in v),
+    ) as RawBehavioralDelta | undefined;
+    if (inner) {
+      delta = inner;
+    } else {
+      return { ok: false, error: 'Behavioral delta response has unexpected structure' };
+    }
+  } else {
+    return { ok: false, error: 'Behavioral delta response is not an object' };
+  }
+
+  function toBehaviorEntries(raw: RawBehaviorEntry[], type: BehaviorEntry['type']): BehaviorEntry[] {
+    return (raw || []).map((r) => ({
+      id: generateId(),
+      description: r.description || '',
+      type,
+      testScenario: r.testScenario || '',
+      expectedOutcome: r.expectedOutcome || '',
+      actualOutcome: null,
+      filePaths: r.filePaths || [],
+      verified: false,
+      aiReasoned: true,
+    }));
+  }
+
+  return {
+    ok: true,
+    data: {
+      changed: toBehaviorEntries(delta.changed, 'changed'),
+      preserved: toBehaviorEntries(delta.preserved, 'preserved'),
+      unexpected: toBehaviorEntries(delta.unexpected, 'unexpected'),
+      summary: delta.summary || '',
     },
   };
 }

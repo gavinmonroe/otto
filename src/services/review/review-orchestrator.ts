@@ -7,10 +7,11 @@
 // ---------------------------------------------------------------------------
 
 import type { OttoSettings, GitLabHost } from '@/types/settings';
-import type { MrContext, RelatedFile, FileActivityData, AcValidationData, AcValidationResult } from '@/types/review';
+import type { MrContext, RelatedFile, FileActivityData, AcValidationData, AcValidationResult, EdgeCase, MrSummary } from '@/types/review';
 import type { StreamChunk } from '@/types/messages';
 import type { ReviewTask } from './review-types';
 import type { TicketInfo } from '@/types/ticket';
+import type { AdversarialTestData, ContractData, BehavioralDeltaData } from '@/types/verification';
 import * as aiService from '../ai/ai-service';
 import * as gitlab from '../gitlab/gitlab-client';
 import * as repoService from '../gitlab/repo-service';
@@ -27,18 +28,31 @@ import { parseAcceptanceCriteria } from '../ticket/ac-parser';
 import { fetchRepoConfig, formatRepoConfigForPrompt } from './repo-config';
 import type { RepoConfig } from './repo-config';
 import { normalizeUrl } from '@/lib/utils';
+import { computeTrustAssessment } from '../verification/trust-calibrator';
 
 type SendChunk = (chunk: StreamChunk) => void;
 
 /**
  * Execute the full review pipeline.
+ *
+ * @param signal - Optional AbortSignal for pause/cancel support.
+ *   When aborted, the orchestrator stops at the next checkpoint and
+ *   sends STREAM_REVIEW_PAUSED. Partial results are already cached
+ *   by individual task runners, so resume will skip completed work.
  */
 export async function executeReview(
   context: MrContext,
   tasks: ReviewTask[],
   settings: OttoSettings,
   send: SendChunk,
+  signal?: AbortSignal,
 ): Promise<void> {
+  // Early abort check — the review may have been cancelled before we even start
+  if (signal?.aborted) {
+    send({ type: 'STREAM_REVIEW_PAUSED', payload: { reason: 'Cancelled before start' } });
+    return;
+  }
+
   const host = resolveHost(settings, context.hostUrl);
 
   // Detect self-review: is the current user the MR author?
@@ -56,21 +70,101 @@ export async function executeReview(
   // This ensures the port stays alive while context enrichment runs.
   const taskPromises: Promise<void>[] = [];
 
+  // Collect outputs from core tasks for verification layer inputs
+  let collectedSummary: MrSummary | null = null;
+  let collectedEdgeCases: EdgeCase[] = [];
+
+  // Promise that resolves when the summary task completes (or immediately if not requested).
+  // Verification tasks that need the summary can await this.
+  let resolveSummaryReady: () => void;
+  const summaryReady = new Promise<void>((resolve) => { resolveSummaryReady = resolve; });
+
+  // ---------------------------------------------------------------------------
+  // Task-level cache skip — load previous review and skip tasks that already
+  // have results. This makes resume-from-pause nearly instant for completed
+  // tasks, and avoids re-running expensive AI calls on page reload.
+  // ---------------------------------------------------------------------------
+  const previousReview = await loadLatestCachedReview(context.projectPath, context.mrIid);
+  const skippedTasks = new Set<string>();
+
+  // Summary: if cached, emit it and skip the AI call
+  if (tasks.includes('summary') && previousReview?.summary) {
+    send({ type: 'STREAM_SUMMARY_COMPLETE', payload: { summary: previousReview.summary } });
+    collectedSummary = previousReview.summary;
+    skippedTasks.add('summary');
+    resolveSummaryReady!();
+  }
+
+  // Edge cases: if cached, emit and skip
+  if (tasks.includes('edgeCases') && previousReview?.edgeCases && previousReview.edgeCases.length > 0) {
+    send({ type: 'STREAM_EDGE_CASES_COMPLETE', payload: { edgeCases: previousReview.edgeCases } });
+    collectedEdgeCases = previousReview.edgeCases;
+    skippedTasks.add('edgeCases');
+  }
+
+  // Related files: if cached, emit and skip
+  if (tasks.includes('relatedFiles') && previousReview?.relatedFiles && previousReview.relatedFiles.length > 0) {
+    send({ type: 'STREAM_RELATED_FILES_COMPLETE', payload: { files: previousReview.relatedFiles } });
+    skippedTasks.add('relatedFiles');
+  }
+
+  // File activity: if cached, emit and skip
+  if (previousReview?.fileActivity) {
+    send({ type: 'STREAM_FILE_ACTIVITY_COMPLETE', payload: { fileActivity: previousReview.fileActivity } });
+    skippedTasks.add('fileActivity');
+  }
+
+  // Verification tasks: if cached, emit and skip
+  const cachedVerification = previousReview?.verification;
+  if (tasks.includes('adversarialTests') && cachedVerification?.adversarialTests) {
+    send({ type: 'STREAM_ADVERSARIAL_TESTS_COMPLETE', payload: { data: cachedVerification.adversarialTests } });
+    skippedTasks.add('adversarialTests');
+  }
+  if (tasks.includes('contracts') && cachedVerification?.contracts) {
+    send({ type: 'STREAM_CONTRACTS_COMPLETE', payload: { data: cachedVerification.contracts } });
+    skippedTasks.add('contracts');
+  }
+  if (tasks.includes('behavioralDelta') && cachedVerification?.behavioralDelta) {
+    send({ type: 'STREAM_BEHAVIORAL_DELTA_COMPLETE', payload: { data: cachedVerification.behavioralDelta } });
+    skippedTasks.add('behavioralDelta');
+  }
+  if (cachedVerification?.trust) {
+    send({ type: 'STREAM_TRUST_COMPLETE', payload: { trust: cachedVerification.trust } });
+    skippedTasks.add('trust');
+  }
+
+  // Ticket context: if cached, emit
+  if (previousReview?.ticketContext && (previousReview?.ticketKeys?.length ?? 0) > 0) {
+    send({ type: 'STREAM_TICKET_CONTEXT', payload: { ticketContext: previousReview.ticketContext, ticketKeys: previousReview.ticketKeys ?? [] } });
+  }
+
+  if (skippedTasks.size > 0) {
+    send({ type: 'STREAM_PROGRESS', payload: { message: `Reusing cached results for ${skippedTasks.size} task(s). Running remaining tasks...` } });
+  }
+
   // Fetch ticket context in parallel with everything else
   const ticketContextReady = fetchTicketContext(context, settings, send);
 
   // Discover file activity (cross-MR awareness) in parallel.
   // Code review needs this data, but edge cases and related files don't.
-  const fileActivityReady = runFileActivityTask(context, host, send);
+  // Skip if we already have cached file activity.
+  const fileActivityReady = skippedTasks.has('fileActivity')
+    ? Promise.resolve(previousReview?.fileActivity ?? null)
+    : runFileActivityTask(context, host, send);
 
-  if (tasks.includes('summary')) {
+  if (tasks.includes('summary') && !skippedTasks.has('summary')) {
     send({ type: 'STREAM_PROGRESS', payload: { message: 'Generating MR summary...' } });
     // Summary can use ticket context — wait for it
     taskPromises.push(
       ticketContextReady.then(({ formatted }) =>
-        runSummaryTask(context, settings, formatted, send),
-      ),
+        runSummaryTask(context, settings, formatted, send, (summary) => {
+          collectedSummary = summary;
+          resolveSummaryReady!();
+        }),
+      ).catch(() => { resolveSummaryReady!(); }), // Resolve even on failure so verification doesn't hang
     );
+  } else if (!skippedTasks.has('summary')) {
+    resolveSummaryReady!(); // No summary task — resolve immediately
   }
 
   // Pre-fetch context in parallel with summary
@@ -82,25 +176,30 @@ export async function executeReview(
   // Edge cases and related files start immediately — they don't need file activity.
   const remainingTasks = Promise.all([contextReady, ticketContextReady]).then(
     async ([{ fileContents, fileTreePaths, enrichedContext, repoConfig }, { formatted: ticketContext, tickets }]) => {
+      // Abort checkpoint: check before launching expensive AI tasks
+      if (signal?.aborted) return;
+
       const remaining: Promise<void>[] = [];
 
       if (tasks.includes('codeReview')) {
         // Code review waits for file activity so it can inject per-file context.
         // File activity is fast (API calls only, no AI) so this doesn't cause timeouts.
+        // Note: codeReview has its own incremental skip logic inside runCodeReviewTask
+        // (per-file diff hash matching), so we always run it — it handles partial skips internally.
         remaining.push(
           fileActivityReady.then((fileActivity) => {
             send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${context.diffFiles.length} changed files...` } });
-            return runCodeReviewTask(context, settings, fileContents, enrichedContext, ticketContext, fileActivity, repoConfig, isAuthorReview, host, send);
+            return runCodeReviewTask(context, settings, fileContents, enrichedContext, ticketContext, fileActivity, repoConfig, isAuthorReview, host, send, signal);
           }),
         );
       }
 
-      if (tasks.includes('edgeCases')) {
+      if (tasks.includes('edgeCases') && !skippedTasks.has('edgeCases')) {
         send({ type: 'STREAM_PROGRESS', payload: { message: 'Analyzing edge cases...' } });
-        remaining.push(runEdgeCasesTask(context, settings, fileContents, ticketContext, send));
+        remaining.push(runEdgeCasesTask(context, settings, fileContents, ticketContext, send, (edgeCases) => { collectedEdgeCases = edgeCases; }));
       }
 
-      if (tasks.includes('relatedFiles')) {
+      if (tasks.includes('relatedFiles') && !skippedTasks.has('relatedFiles')) {
         send({ type: 'STREAM_PROGRESS', payload: { message: 'Discovering related files...' } });
         remaining.push(
           runRelatedFilesTask(context, settings, fileContents, fileTreePaths, host, send),
@@ -108,16 +207,100 @@ export async function executeReview(
       }
 
       // AC validation — only runs if tickets with acceptance criteria exist
-      if (tickets.size > 0) {
+      // and the feature is enabled in settings
+      if (tickets.size > 0 && settings.preferences.enabledFeatures?.acValidation !== false) {
         remaining.push(runAcValidationTask(context, settings, tickets, send));
       }
 
       await Promise.all(remaining);
+
+      // Abort checkpoint: check before launching verification layer
+      if (signal?.aborted) return;
+
+      // --- Verification layer (Ideas 1-5) ---
+      // Runs after the core review tasks complete so it can use their outputs
+      // as inputs (edge cases → adversarial tests, summary → behavioral delta).
+      const hasVerificationTasks = (tasks.includes('adversarialTests') && !skippedTasks.has('adversarialTests'))
+        || (tasks.includes('contracts') && !skippedTasks.has('contracts'))
+        || (tasks.includes('behavioralDelta') && !skippedTasks.has('behavioralDelta'));
+
+      if (hasVerificationTasks) {
+        send({ type: 'STREAM_PROGRESS', payload: { message: 'Starting verification analysis...' } });
+
+        const verificationPromises: Promise<void>[] = [];
+
+        // Collect results from core review for verification inputs
+        const fileContentsRecord: Record<string, string> = {};
+        for (const [path, content] of fileContents) {
+          fileContentsRecord[path] = content;
+        }
+
+        // Track verification outputs for trust calibration
+        let adversarialTestsResult: AdversarialTestData | null = null;
+        let contractsResult: ContractData | null = null;
+        let behavioralDeltaResult: BehavioralDeltaData | null = null;
+
+        // Adversarial tests — uses edge cases as hints (collected from earlier task)
+        if (tasks.includes('adversarialTests') && !skippedTasks.has('adversarialTests')) {
+          send({ type: 'STREAM_PROGRESS', payload: { message: 'Generating adversarial tests...' } });
+          verificationPromises.push(
+            runAdversarialTestsTask(context, settings, fileContentsRecord, collectedEdgeCases, send)
+              .then((result) => { adversarialTestsResult = result; }),
+          );
+        }
+
+        // Contracts — independent, can run in parallel
+        if (tasks.includes('contracts') && !skippedTasks.has('contracts')) {
+          send({ type: 'STREAM_PROGRESS', payload: { message: 'Inferring function contracts...' } });
+          verificationPromises.push(
+            runContractsTask(context, settings, fileContentsRecord, send)
+              .then((result) => { contractsResult = result; }),
+          );
+        }
+
+        // Behavioral delta — uses summary for intent alignment, wait for summary to complete
+        if (tasks.includes('behavioralDelta') && !skippedTasks.has('behavioralDelta')) {
+          send({ type: 'STREAM_PROGRESS', payload: { message: 'Analyzing behavioral delta...' } });
+          verificationPromises.push(
+            summaryReady.then(() =>
+              runBehavioralDeltaTask(context, settings, fileContentsRecord, collectedSummary, send)
+                .then((result) => { behavioralDeltaResult = result; }),
+            ),
+          );
+        }
+
+        await Promise.all(verificationPromises);
+
+        // Trust calibration — runs after all verification tasks complete
+        if (adversarialTestsResult || contractsResult || behavioralDeltaResult) {
+          try {
+            send({ type: 'STREAM_PROGRESS', payload: { message: 'Computing trust assessment...' } });
+            const trust = computeTrustAssessment(
+              adversarialTestsResult,
+              contractsResult,
+              behavioralDeltaResult,
+              null, // No CI execution yet — AI-only mode
+            );
+            send({ type: 'STREAM_TRUST_COMPLETE', payload: { trust } });
+          } catch (error) {
+            send({
+              type: 'STREAM_PROGRESS',
+              payload: { message: `Trust calibration failed: ${error instanceof Error ? error.message : 'unknown'}` },
+            });
+          }
+        }
+      }
     });
 
   taskPromises.push(remainingTasks);
 
   await Promise.all(taskPromises);
+
+  // If aborted, send paused signal instead of complete
+  if (signal?.aborted) {
+    send({ type: 'STREAM_REVIEW_PAUSED', payload: { reason: 'Review paused by user' } });
+    return;
+  }
 
   send({ type: 'STREAM_ALL_COMPLETE' });
 }
@@ -339,6 +522,7 @@ async function runSummaryTask(
   settings: OttoSettings,
   ticketContext: string | null,
   send: SendChunk,
+  onComplete?: (summary: MrSummary) => void,
 ): Promise<void> {
   try {
     const result = await aiService.generateSummary(
@@ -351,6 +535,7 @@ async function runSummaryTask(
 
     if (result.ok) {
       send({ type: 'STREAM_SUMMARY_COMPLETE', payload: { summary: result.data } });
+      onComplete?.(result.data);
     } else {
       send({ type: 'STREAM_TASK_ERROR', payload: { task: 'summary', error: result.error } });
     }
@@ -373,6 +558,7 @@ async function runCodeReviewTask(
   isAuthorReview: boolean,
   host: GitLabHost | null,
   send: SendChunk,
+  signal?: AbortSignal,
 ): Promise<void> {
   const concurrency = 3;
   const allFiles = context.diffFiles.filter((f) => !f.isDeleted || f.diff.length > 0);
@@ -427,10 +613,47 @@ async function runCodeReviewTask(
   if (filesToReview.length === 0) return;
 
   for (let i = 0; i < filesToReview.length; i += concurrency) {
+    // Abort checkpoint: check between file batches for responsive pause
+    if (signal?.aborted) return;
+
     const batch = filesToReview.slice(i, i + concurrency);
     const batchPromises = batch.map(async (file) => {
+      // Per-file timeout with countdown progress messages.
+      // Uses a safe pattern that prevents unhandled rejections:
+      // the timeout resolves with a sentinel value instead of rejecting,
+      // so Promise.race never leaves a dangling rejection.
+      const FILE_REVIEW_TIMEOUT = 180_000; // 3 minutes
+      const COUNTDOWN_INTERVAL = 30_000;   // Progress update every 30s
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let countdownId: ReturnType<typeof setInterval> | null = null;
+      const TIMEOUT_SENTINEL = Symbol('timeout');
+
+      const fileName = file.filePath.split('/').pop() || file.filePath;
+      const startTime = Date.now();
+
+      const timeoutPromise = new Promise<typeof TIMEOUT_SENTINEL>((resolve) => {
+        // Countdown progress messages
+        countdownId = setInterval(() => {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          const remaining = Math.round((FILE_REVIEW_TIMEOUT - (Date.now() - startTime)) / 1000);
+          if (remaining > 0) {
+            send({ type: 'STREAM_PROGRESS', payload: { message: `Still reviewing ${fileName}... (${elapsed}s elapsed, ${remaining}s until timeout)` } });
+          }
+        }, COUNTDOWN_INTERVAL);
+
+        // Final timeout — resolves with sentinel instead of rejecting
+        timeoutId = setTimeout(() => {
+          timeoutId = null;
+          resolve(TIMEOUT_SENTINEL);
+        }, FILE_REVIEW_TIMEOUT);
+      });
+
+      const clearTimers = () => {
+        if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+        if (countdownId) { clearInterval(countdownId); countdownId = null; }
+      };
+
       try {
-        const fileName = file.filePath.split('/').pop() || file.filePath;
         send({ type: 'STREAM_PROGRESS', payload: { message: `Reviewing ${fileName}...` } });
 
         // Build repo context string for this file
@@ -483,27 +706,43 @@ async function runCodeReviewTask(
           }
         }
 
-        const result = await aiService.generateFileReview(
-          settings.ai,
-          {
-            file,
-            fullFileContent: fileContents.get(file.filePath) || null,
-            mrTitle: context.title,
-            mrDescription: context.description,
-            repoContext,
-            callerSnippets,
-            ticketContext,
-            reviewerPreferences,
-            fileActivityContext,
-            repoConfigContext: repoConfig ? formatRepoConfigForPrompt(repoConfig) : null,
-            isAuthorReview,
-          },
-          (delta) => send({
-            type: 'STREAM_FILE_REVIEW_DELTA',
-            payload: { filePath: file.filePath, content: delta },
-          }),
-        );
+        const raceResult = await Promise.race([
+          aiService.generateFileReview(
+            settings.ai,
+            {
+              file,
+              fullFileContent: fileContents.get(file.filePath) || null,
+              mrTitle: context.title,
+              mrDescription: context.description,
+              repoContext,
+              callerSnippets,
+              ticketContext,
+              reviewerPreferences,
+              fileActivityContext,
+              repoConfigContext: repoConfig ? formatRepoConfigForPrompt(repoConfig) : null,
+              isAuthorReview,
+            },
+            (delta) => send({
+              type: 'STREAM_FILE_REVIEW_DELTA',
+              payload: { filePath: file.filePath, content: delta },
+            }),
+          ),
+          timeoutPromise,
+        ]);
 
+        // Clear timers — the review completed or timed out
+        clearTimers();
+
+        // Check for timeout sentinel
+        if (raceResult === TIMEOUT_SENTINEL) {
+          send({
+            type: 'STREAM_TASK_ERROR',
+            payload: { task: `codeReview:${file.filePath}`, error: `File review timed out after ${FILE_REVIEW_TIMEOUT / 1000}s` },
+          });
+          return;
+        }
+
+        const result = raceResult;
         if (result.ok) {
           send({ type: 'STREAM_FILE_REVIEW_COMPLETE', payload: { fileReview: result.data } });
         } else {
@@ -513,6 +752,8 @@ async function runCodeReviewTask(
           });
         }
       } catch (error) {
+        // Clear timers on error
+        clearTimers();
         send({
           type: 'STREAM_TASK_ERROR',
           payload: {
@@ -525,6 +766,11 @@ async function runCodeReviewTask(
 
     await Promise.all(batchPromises);
   }
+
+  // Explicitly mark codeReview task as complete after all batches finish.
+  // Without this, the task stays in 'streaming' if the last file completed
+  // but STREAM_ALL_COMPLETE hasn't fired yet (other tasks still running).
+  send({ type: 'STREAM_PROGRESS', payload: { message: 'File reviews complete.' } });
 }
 
 async function runEdgeCasesTask(
@@ -533,6 +779,7 @@ async function runEdgeCasesTask(
   fileContents: Map<string, string>,
   ticketContext: string | null,
   send: SendChunk,
+  onComplete?: (edgeCases: EdgeCase[]) => void,
 ): Promise<void> {
   try {
     const fileContentsRecord: Record<string, string> = {};
@@ -554,6 +801,7 @@ async function runEdgeCasesTask(
 
     if (result.ok) {
       send({ type: 'STREAM_EDGE_CASES_COMPLETE', payload: { edgeCases: result.data } });
+      onComplete?.(result.data);
     } else {
       send({ type: 'STREAM_TASK_ERROR', payload: { task: 'edgeCases', error: result.error } });
     }
@@ -781,4 +1029,114 @@ function resolveHost(settings: OttoSettings, hostUrl: string): GitLabHost | null
   return settings.gitlab.hosts.find(
     (h) => normalizeUrl(h.url).toLowerCase() === normalized,
   ) || null;
+}
+
+// ---------------------------------------------------------------------------
+// Verification task runners (Ideas 1-3)
+// ---------------------------------------------------------------------------
+
+async function runAdversarialTestsTask(
+  context: MrContext,
+  settings: OttoSettings,
+  fileContents: Record<string, string>,
+  edgeCases: EdgeCase[],
+  send: SendChunk,
+): Promise<AdversarialTestData | null> {
+  try {
+    const result = await aiService.generateAdversarialTests(
+      settings.ai,
+      {
+        diffFiles: context.diffFiles,
+        fileContents,
+        mrTitle: context.title,
+        mrDescription: context.description,
+        edgeCases,
+      },
+      (delta) => send({ type: 'STREAM_ADVERSARIAL_TESTS_DELTA', payload: { content: delta } }),
+    );
+
+    if (result.ok) {
+      send({ type: 'STREAM_ADVERSARIAL_TESTS_COMPLETE', payload: { data: result.data } });
+      return result.data;
+    } else {
+      send({ type: 'STREAM_TASK_ERROR', payload: { task: 'adversarialTests', error: result.error } });
+      return null;
+    }
+  } catch (error) {
+    send({
+      type: 'STREAM_TASK_ERROR',
+      payload: { task: 'adversarialTests', error: error instanceof Error ? error.message : 'Adversarial test generation failed' },
+    });
+    return null;
+  }
+}
+
+async function runContractsTask(
+  context: MrContext,
+  settings: OttoSettings,
+  fileContents: Record<string, string>,
+  send: SendChunk,
+): Promise<ContractData | null> {
+  try {
+    const result = await aiService.generateContracts(
+      settings.ai,
+      {
+        diffFiles: context.diffFiles,
+        fileContents,
+        mrTitle: context.title,
+        mrDescription: context.description,
+      },
+      (delta) => send({ type: 'STREAM_CONTRACTS_DELTA', payload: { content: delta } }),
+    );
+
+    if (result.ok) {
+      send({ type: 'STREAM_CONTRACTS_COMPLETE', payload: { data: result.data } });
+      return result.data;
+    } else {
+      send({ type: 'STREAM_TASK_ERROR', payload: { task: 'contracts', error: result.error } });
+      return null;
+    }
+  } catch (error) {
+    send({
+      type: 'STREAM_TASK_ERROR',
+      payload: { task: 'contracts', error: error instanceof Error ? error.message : 'Contract inference failed' },
+    });
+    return null;
+  }
+}
+
+async function runBehavioralDeltaTask(
+  context: MrContext,
+  settings: OttoSettings,
+  fileContents: Record<string, string>,
+  summary: MrSummary | null,
+  send: SendChunk,
+): Promise<BehavioralDeltaData | null> {
+  try {
+    const result = await aiService.generateBehavioralDelta(
+      settings.ai,
+      {
+        diffFiles: context.diffFiles,
+        fileContents,
+        mrTitle: context.title,
+        mrDescription: context.description,
+        summary,
+      },
+      (delta) => send({ type: 'STREAM_BEHAVIORAL_DELTA_DELTA', payload: { content: delta } }),
+    );
+
+    if (result.ok) {
+      send({ type: 'STREAM_BEHAVIORAL_DELTA_COMPLETE', payload: { data: result.data } });
+      return result.data;
+    } else {
+      send({ type: 'STREAM_TASK_ERROR', payload: { task: 'behavioralDelta', error: result.error } });
+      return null;
+    }
+  } catch (error) {
+    send({
+      type: 'STREAM_TASK_ERROR',
+      payload: { task: 'behavioralDelta', error: error instanceof Error ? error.message : 'Behavioral delta analysis failed' },
+    });
+    return null;
+  }
 }

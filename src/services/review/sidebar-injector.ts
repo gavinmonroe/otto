@@ -44,7 +44,17 @@ const SIDEBAR_SELECTORS = [
 export function startRelatedFilesSidebar(isDarkMode: boolean, signal?: AbortSignal): () => void {
   let injected = false;
 
+  // Track previous references to skip unrelated store updates.
+  // Without this, every streaming delta triggers a full sidebar re-render.
+  let prevRelatedFiles = useReviewStore.getState().relatedFiles;
+  let prevFileReviews = useReviewStore.getState().fileReviews;
+
   const unsubscribe = useReviewStore.subscribe((state) => {
+    // Only act when relatedFiles or fileReviews references change
+    if (state.relatedFiles === prevRelatedFiles && state.fileReviews === prevFileReviews) return;
+    prevRelatedFiles = state.relatedFiles;
+    prevFileReviews = state.fileReviews;
+
     const hasContent = state.relatedFiles.length > 0 || state.fileReviews.length > 0;
     if (!hasContent) return;
     if (injected) {

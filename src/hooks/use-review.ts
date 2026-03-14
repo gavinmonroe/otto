@@ -10,6 +10,8 @@ import { useCallback, useRef, useEffect } from 'react';
 import { useReviewStore } from '@/services/review/review-store';
 import { startReviewStream, retryReviewTasks } from '@/services/review/stream-dispatcher';
 import { deleteCachedReview, computeDiffHash } from '@/services/review/review-cache';
+import { sendMessage } from '@/lib/messaging';
+import { disconnectMrQueuePort } from '@/services/review/queue-bridge';
 import type { ReviewTask } from '@/services/review/review-types';
 
 export function useReview() {
@@ -54,8 +56,24 @@ export function useReview() {
   }, []);
 
   const cancelReview = useCallback(() => {
-    disconnectRef.current?.();
-    disconnectRef.current = null;
+    // If there's an active stream, disconnect it
+    if (disconnectRef.current) {
+      disconnectRef.current();
+      disconnectRef.current = null;
+      useReviewStore.getState().setError('Review cancelled');
+      return;
+    }
+
+    // No active stream — this might be a queue-driven review.
+    // Send a pause message to the queue manager and disconnect the queue port.
+    const mrContext = useReviewStore.getState().mrContext;
+    if (mrContext) {
+      sendMessage({
+        type: 'PAUSE_REVIEW',
+        payload: { projectPath: mrContext.projectPath, mrIid: mrContext.mrIid },
+      });
+    }
+    disconnectMrQueuePort();
     useReviewStore.getState().setError('Review cancelled');
   }, []);
 
@@ -90,6 +108,10 @@ export function useReview() {
     ticketKeys: store.ticketKeys,
     fileActivity: store.fileActivity,
     acValidation: store.acValidation,
+    verification: store.verification,
+    adversarialTestsDelta: store.adversarialTestsDelta,
+    contractsDelta: store.contractsDelta,
+    behavioralDeltaDelta: store.behavioralDeltaDelta,
     startReview,
     regenerateReview,
     cancelReview,

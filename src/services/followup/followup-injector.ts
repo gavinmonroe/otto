@@ -21,6 +21,7 @@ import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { FollowUpButton } from '@/components/followup/FollowUpButton';
 import { FollowUpPanel } from '@/components/followup/FollowUpPanel';
 import { useReviewStore } from '@/services/review/review-store';
+import { getHealthLevel } from '@/services/review/health-monitor';
 
 const BUTTON_ATTR = 'data-otto-followup-btn';
 const PANEL_ATTR = 'data-otto-followup-panel';
@@ -65,8 +66,9 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
 
   // Periodic rescan — catches virtual scrolling edge cases where GitLab
   // destroys and recreates note elements without triggering useful mutations.
-  // Same strategy as dom-observer.ts uses for diff files.
+  // Skipped in critical health to reduce main thread pressure.
   const rescanInterval = setInterval(() => {
+    if (getHealthLevel() === 'critical') return;
     pruneDetachedButtons();
     pruneDetachedPanels();
     scanAndInjectButtons(isDarkMode);
@@ -84,8 +86,14 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
   };
   document.addEventListener('visibilitychange', handleVisibility);
 
-  // Subscribe to store for panel re-renders
+  // Subscribe to store for panel re-renders — only when followUps reference changes.
+  // Without this, every streaming delta triggers panel iteration ~60 times/sec.
+  let prevFollowUps = useReviewStore.getState().followUps;
+
   const storeUnsubscribe = useReviewStore.subscribe((state) => {
+    if (state.followUps === prevFollowUps) return;
+    prevFollowUps = state.followUps;
+
     for (const [commentId, panel] of mountedPanels) {
       const analysis = state.followUps[commentId];
       if (analysis && visiblePanels.has(commentId)) {
@@ -152,11 +160,18 @@ function pruneDetachedPanels(): void {
 // ---------------------------------------------------------------------------
 
 function scanAndInjectButtons(isDarkMode: boolean): void {
-  // Find all note elements that have action bars
-  // GitLab uses .note-actions for the button row in each comment
+  // Find all note elements that have action bars.
+  // GitLab uses different DOM structures across versions:
+  // - Older: .note with .note-actions
+  // - Newer: [data-testid] wrappers with different action bar classes
+  // - Vue 3 migration: .timeline-entry containers
+  // We cast a wide net and filter inside the loop.
   const noteElements = document.querySelectorAll(
     '.note:not([data-otto-followup-btn]), ' +
-    '.timeline-entry:not([data-otto-followup-btn])',
+    '.timeline-entry:not([data-otto-followup-btn]), ' +
+    '[data-testid="note-wrapper"]:not([data-otto-followup-btn]), ' +
+    '[data-testid="noteable-note-container"]:not([data-otto-followup-btn]), ' +
+    'li.note:not([data-otto-followup-btn])',
   );
 
   for (const noteEl of noteElements) {
@@ -164,12 +179,15 @@ function scanAndInjectButtons(isDarkMode: boolean): void {
 
     // Skip system notes (e.g., "merged", "assigned to", "mentioned in")
     if (htmlNote.classList.contains('system-note')) continue;
+    if (htmlNote.querySelector('.system-note-message')) continue;
 
     // Skip notes that are Otto's own injected UI
     if (htmlNote.closest('[data-otto-overview]') || htmlNote.closest('[data-otto-followup-panel]')) continue;
 
-    // Find the action bar
-    const actionBar = htmlNote.querySelector('.note-actions');
+    // Find the action bar — try multiple selectors for GitLab version compat
+    const actionBar = htmlNote.querySelector(
+      '.note-actions, [data-testid="note-actions"], .note-header-actions',
+    );
     if (!actionBar) continue;
 
     // Get a stable ID for this note

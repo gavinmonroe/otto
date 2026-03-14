@@ -29,6 +29,8 @@ export type GitLabMergeRequest = {
   };
   labels: string[];
   web_url: string;
+  created_at?: string;   // ISO 8601 — present in API response, optional in our type for backward compat
+  updated_at?: string;   // ISO 8601
   diff_refs: {
     base_sha: string;
     head_sha: string;

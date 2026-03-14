@@ -22,6 +22,7 @@ import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { InlineCommentThread } from '@/components/review/InlineCommentThread';
 import { useReviewStore } from '@/services/review/review-store';
 import type { ReviewComment, ReviewCommentStatus } from '@/types/review';
+import { getHealthLevel } from '@/services/review/health-monitor';
 
 const INJECTED_ATTR = 'data-otto-inline-comment';
 
@@ -53,8 +54,16 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
     }
   }
 
+  // Track previous fileReviews reference to skip unrelated store updates.
+  // Without this, every streaming delta (summaryDelta, edgeCasesDelta, etc.)
+  // would trigger these callbacks ~60 times/sec and crash the tab on large MRs.
+  let prevFileReviews = initialState.fileReviews;
+
   const unsubscribe = useReviewStore.subscribe((state) => {
-    // Only act when new file reviews arrive
+    // Only act when the fileReviews array reference changes
+    if (state.fileReviews === prevFileReviews) return;
+    prevFileReviews = state.fileReviews;
+
     if (state.fileReviews.length === lastFileReviewCount) return;
 
     const newReviews = state.fileReviews.slice(lastFileReviewCount);
@@ -72,7 +81,14 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
   // Subscribe to comment status changes ONLY — skip re-renders unless
   // a comment's status actually changed. This prevents the O(n*m) re-render
   // storm that was crashing tabs on large MRs.
+  //
+  // Uses reference equality on fileReviews to skip streaming delta updates.
+  let prevFileReviewsForStatus = initialState.fileReviews;
+
   const statusUnsubscribe = useReviewStore.subscribe((state) => {
+    if (state.fileReviews === prevFileReviewsForStatus) return;
+    prevFileReviewsForStatus = state.fileReviews;
+
     for (const fileReview of state.fileReviews) {
       for (const comment of fileReview.comments) {
         const mounted = mountedComments.get(comment.id);
@@ -104,6 +120,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
 
   const domObserver = new MutationObserver(() => {
     if (retryTimer) return; // Already scheduled
+    if (getHealthLevel() === 'critical') return; // Skip DOM work under heavy load
     retryTimer = setTimeout(() => {
       retryTimer = null;
       pruneDetachedComments();
@@ -116,7 +133,9 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
 
   // Periodic rescan — catches virtual scrolling edge cases where GitLab
   // destroys and recreates diff rows without triggering useful mutations.
+  // Skipped in critical health to reduce main thread pressure.
   const rescanInterval = setInterval(() => {
+    if (getHealthLevel() === 'critical') return;
     pruneDetachedComments();
     retryPendingComments(isDarkMode);
   }, 3000);
