@@ -1,5 +1,13 @@
 # Otto — AI Code Review for GitLab
 
+<p align="center">
+  <img src="otto-animated.svg" alt="Otto" width="80" />
+</p>
+
+<p align="center">
+  AI-powered code review tooling that lives inside GitLab.
+</p>
+
 Otto is an open-source Chrome extension that injects AI-powered code review tooling directly into GitLab merge request pages. It surfaces MR summaries, per-file review comments, edge case analysis, related file discovery, behavioral verification, and more — all rendered inline within the GitLab UI.
 
 All AI suggestions are drafts you can accept, edit, or dismiss. Nothing is auto-posted to GitLab.
@@ -20,16 +28,29 @@ Works with gitlab.com, self-hosted GitLab instances, and any OpenAI-compatible A
 
 ### Core Review
 
+<p align="center">
+  <img src="docs/mr-overview.png" alt="Otto MR Overview Panel" width="700" />
+</p>
+
 | Feature | Description |
 |---------|-------------|
 | **MR Summary** | Overview of what changed and why, risk assessment, key changes, affected areas |
 | **Per-File Review** | Comments with severity (critical/warning/suggestion/info), category labels, code suggestions with inline diffs |
 | **Edge Case Analysis** | Identifies boundary conditions, race conditions, null safety issues, resource leaks — with hypothetical failure traces |
 | **Related Files** | Discovers files not in the diff that are relevant (importers, shared types, tests, configs) with fetched content |
+
+<p align="center">
+  <img src="docs/related-files.png" alt="Otto Related Files Discovery" width="500" />
+</p>
+
 | **File Activity** | Cross-MR awareness — shows recently-merged MRs that touched the same files (30-day lookback) |
 | **Acceptance Criteria** | Validates the diff against Jira ticket acceptance criteria (satisfied/unclear/not-found per criterion) |
 
 ### Guided Review Mode
+
+<p align="center">
+  <img src="docs/guided-review.png" alt="Otto Guided Review Mode" width="700" />
+</p>
 
 A slide-based presentation that replaces GitLab's diff view with a prioritized walkthrough:
 
@@ -49,6 +70,10 @@ Three AI-powered verification analyses run automatically after the core review:
 - **Trust Score** — composite confidence badge (0-100) based on mutation score, counterexample quality, test independence. AI-only mode capped at 65%.
 
 ### MR List Command Center
+
+<p align="center">
+  <img src="docs/mr-list.png" alt="Otto MR List Command Center" width="700" />
+</p>
 
 Enhances GitLab's merge request list page:
 
@@ -78,6 +103,10 @@ One-click analysis on any GitLab comment thread:
 - Cached per thread with hash-based invalidation
 
 ### Inline Integration
+
+<p align="center">
+  <img src="docs/inline-review.png" alt="Otto Inline Review Comments" width="700" />
+</p>
 
 Otto injects UI elements throughout GitLab's native interface:
 
