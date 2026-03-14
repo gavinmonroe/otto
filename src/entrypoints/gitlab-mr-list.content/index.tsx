@@ -128,8 +128,10 @@ async function initMrListCommandCenter(
     isDark,
     brandColor: isDark ? '#40C4F5' : '#0c93e7',
   };
-  // Find all MR rows
-  const rows = findMrRows();
+  // Wait for MR rows to appear — GitLab's Vue app may not have rendered them yet.
+  // Polls every 500ms for up to 15 seconds before giving up. Also watches for
+  // DOM mutations so we catch the rows as soon as they appear.
+  const rows = await waitForMrRows(ctx.signal);
   if (rows.length === 0) return;
   // Batch-fetch preview data for all visible MRs
   const mrIids = rows.map((r) => r.mrIid);
@@ -375,10 +377,11 @@ async function initBasicPreviews(
     brandColor: isDark ? '#40C4F5' : '#0c93e7',
   };
 
-  const rows = findMrRows();
+  const rows = await waitForMrRows(ctx.signal);
   for (const row of rows) {
     mountBasicStrip(row, mountCtx, ctx);
   }
+  if (rows.length === 0) return;
 
   const listContainer = document.querySelector('.issuable-list')
     || document.querySelector('.mr-list')
@@ -561,6 +564,63 @@ function findMrRows(): MrRowInfo[] {
     rows.push({ element: el, mrIid: iid });
   }
   return rows;
+}
+
+/**
+ * Wait for MR rows to appear in the DOM.
+ * GitLab's Vue app may not have rendered them when the content script runs.
+ * Uses a combination of polling + MutationObserver for responsiveness.
+ * Gives up after 15 seconds and returns whatever is available (possibly empty).
+ */
+function waitForMrRows(signal: AbortSignal): Promise<MrRowInfo[]> {
+  // Try immediately first
+  const immediate = findMrRows();
+  if (immediate.length > 0) return Promise.resolve(immediate);
+
+  return new Promise<MrRowInfo[]>((resolve) => {
+    const MAX_WAIT = 15_000;
+    const POLL_INTERVAL = 500;
+    let resolved = false;
+
+    const finish = (rows: MrRowInfo[]) => {
+      if (resolved) return;
+      resolved = true;
+      observer.disconnect();
+      clearTimeout(giveUpTimer);
+      clearInterval(pollTimer);
+      resolve(rows);
+    };
+
+    // MutationObserver — catches rows as soon as they're inserted
+    const observer = new MutationObserver(() => {
+      const rows = findMrRows();
+      if (rows.length > 0) finish(rows);
+    });
+
+    const listContainer = document.querySelector('.issuable-list')
+      || document.querySelector('.mr-list')
+      || document.querySelector('[data-testid="issuable-list"]')
+      || document.querySelector('.content-list')
+      || document.body;
+
+    observer.observe(listContainer, { childList: true, subtree: true });
+
+    // Polling fallback — in case the observer misses the initial render
+    const pollTimer = setInterval(() => {
+      const rows = findMrRows();
+      if (rows.length > 0) finish(rows);
+    }, POLL_INTERVAL);
+
+    // Give up after MAX_WAIT — return whatever we have (possibly empty)
+    const giveUpTimer = setTimeout(() => {
+      finish(findMrRows());
+    }, MAX_WAIT);
+
+    // Abort cleanup
+    signal.addEventListener('abort', () => {
+      finish([]);
+    }, { once: true });
+  });
 }
 function extractMrIid(href: string): number | null {
   const match = href.match(/\/-\/merge_requests\/(\d+)/);
