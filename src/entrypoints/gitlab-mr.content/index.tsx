@@ -39,6 +39,8 @@ import type { ReviewTask } from '@/services/review/review-types';
 import type { OttoSettings } from '@/types/settings';
 import { startHealthMonitor } from '@/services/review/health-monitor';
 import { HealthWarningToast } from '@/components/review/HealthWarningToast';
+import { getBottoClient, disconnectBotto } from '@/lib/botto-client';
+import { registerBottoTransport } from '@/lib/messaging';
 
 export default defineContentScript({
   matches: ['*://*/*'],
@@ -54,10 +56,31 @@ export default defineContentScript({
     // Start health monitor early — before any heavy work begins.
     startHealthMonitor(ctx.signal);
 
+    // Clean up Botto connection when the content script is invalidated
+    // (page navigation, extension update, etc.)
+    ctx.onInvalidated(() => {
+      disconnectBotto();
+    });
+
     // Fetch settings once upfront — used to gate features below.
     const settingsResult = await sendMessage({ type: 'GET_SETTINGS' });
     const settings: OttoSettings | null = settingsResult.ok ? settingsResult.data : null;
     const enabled = settings?.preferences.enabledFeatures;
+
+    // Initialize Botto client if configured — must happen before any review streams.
+    // Store settings on globalThis so stream-dispatcher can access them synchronously.
+    if (settings) {
+      (globalThis as any).__ottoSettings = settings;
+      const bottoClient = getBottoClient(settings);
+      if (bottoClient) {
+        try {
+          await bottoClient.connect();
+          registerBottoTransport(() => bottoClient);
+        } catch (e) {
+          console.warn('[otto] Botto connection failed, falling back to local:', e);
+        }
+      }
+    }
 
     // Build a lightweight MR context immediately (no API diff fetch).
     // This gives follow-up buttons the mrContext they need on any tab.
@@ -67,6 +90,72 @@ export default defineContentScript({
       // Load cached chat history for this MR
       if (enabled?.chat !== false) {
         tryLoadCachedChat(lightContext.projectPath, lightContext.mrIid);
+      }
+
+      // Notify Botto we're viewing this MR (for broadcast targeting + cached review delivery)
+      const bottoClient = settings ? getBottoClient(settings) : null;
+      if (bottoClient?.isConnected()) {
+        bottoClient.viewingMr(lightContext.projectPath, lightContext.mrIid);
+
+        // Listen for broadcast messages from other Ottos
+        bottoClient.onMessage('COMMENT_ACTION_BROADCAST', (msg: any) => {
+          const store = useReviewStore.getState();
+          // Update comment status in the store if we have the comment
+          for (const fr of store.fileReviews) {
+            const comment = fr.comments.find((c) => c.id === msg.comment_id);
+            if (comment) {
+              store.updateCommentStatus(comment.id, msg.action, msg.edited_body);
+              break;
+            }
+          }
+        });
+
+        bottoClient.onMessage('FIX_PROGRESS', (msg: any) => {
+          if (msg.comment_id) {
+            const store = useReviewStore.getState();
+            store.updateFixJob(msg.comment_id, {
+              jobId: msg.job_id,
+              status: msg.status,
+              detail: msg.detail,
+            });
+          }
+        });
+
+        bottoClient.onMessage('FIX_COMPLETE', (msg: any) => {
+          if (msg.comment_id) {
+            const store = useReviewStore.getState();
+            if (msg.commit_sha) {
+              store.updateFixJob(msg.comment_id, {
+                jobId: msg.job_id,
+                status: 'complete',
+                detail: 'Fix applied',
+                commitSha: msg.commit_sha,
+              });
+            } else {
+              store.updateFixJob(msg.comment_id, {
+                jobId: msg.job_id,
+                status: 'failed',
+                detail: msg.error || 'Fix failed',
+                error: msg.error || 'Unknown error',
+              });
+            }
+          }
+        });
+
+        bottoClient.onMessage('CACHED_REVIEW', (msg: any) => {
+          // Botto sent us a cached review on join — hydrate the store
+          if (msg.review) {
+            useReviewStore.getState().hydrateFromCache(msg.review);
+          }
+        });
+
+        bottoClient.onMessage('EVENT_NOTIFICATION', (msg: any) => {
+          if (msg.event_type === 'user_joined_mr' && msg.payload?.viewer_count > 1) {
+            useReviewStore.getState().setProgressMessage(
+              `${msg.payload.viewer_count} team members viewing this MR`,
+            );
+          }
+        });
       }
     }
 
@@ -88,6 +177,11 @@ export default defineContentScript({
       const newUrlInfo = parseMrUrl(event.newUrl.href);
       if (!newUrlInfo) return;
       if (newUrlInfo.mrIid !== urlInfo.mrIid || newUrlInfo.projectPath !== urlInfo.projectPath) {
+        // Notify Botto we left the old MR
+        const bottoClient = settings ? getBottoClient(settings) : null;
+        if (bottoClient?.isConnected()) {
+          bottoClient.leftMr();
+        }
         // Disconnect queue port for the old MR — prevents stale chunks
         disconnectMrQueuePort();
         useReviewStore.getState().reset();

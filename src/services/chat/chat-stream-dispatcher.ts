@@ -18,6 +18,7 @@ import { openStream } from '@/lib/messaging';
 import { saveCachedChat, loadCachedChat } from './chat-cache';
 import type { StreamChunk, ChatReviewContext } from '@/types/messages';
 import type { ReviewComment } from '@/types/review';
+import { getBottoClient } from '@/lib/botto-client';
 
 // ---------------------------------------------------------------------------
 // Delta batching
@@ -220,62 +221,88 @@ function startChatStream(
     aiQuestion = `${parts.join('')}\n\nUser question: ${question}`;
   }
 
+  const chatPayload = {
+    question: aiQuestion,
+    history,
+    reviewContext,
+  };
+
+  const onChunkHandler = (chunk: StreamChunk) => {
+    switch (chunk.type) {
+      case 'STREAM_CHAT_DELTA':
+        pendingChatDelta += chunk.payload.content;
+        scheduleDeltaFlush();
+        break;
+
+      case 'STREAM_CHAT_COMPLETE':
+        // Flush any pending delta first
+        if (pendingChatDelta) {
+          flushChatDelta();
+        }
+        useChatStore.getState().completeAssistantMessage(
+          chunk.payload.content,
+          chunk.payload.suggestedQuestions,
+        );
+        activeDisconnect = null;
+        // Persist to cache
+        persistChatToCache();
+        break;
+
+      case 'STREAM_CHAT_ERROR':
+        if (pendingChatDelta) {
+          flushChatDelta();
+        }
+        useChatStore.getState().setError(chunk.payload.error);
+        activeDisconnect = null;
+        break;
+
+      // Ignore review-specific chunks (shouldn't arrive on a chat stream,
+      // but defensive coding in case of protocol mismatch)
+      default:
+        break;
+    }
+  };
+
+  const onDisconnectHandler = () => {
+    const state = useChatStore.getState();
+    if (state.status === 'streaming') {
+      // Flush any remaining delta so partial response is visible
+      if (pendingChatDelta) {
+        flushChatDelta();
+      }
+      state.setError('Connection lost. Try again.');
+    }
+    activeDisconnect = null;
+  };
+
+  // --- Botto transport: route through WebSocket if connected ---
+  try {
+    const bottoClient = getBottoClient((globalThis as any).__ottoSettings);
+    if (bottoClient?.isConnected()) {
+      const { cancel } = bottoClient.openStream(
+        { type: 'STREAM_CHAT', ...chatPayload },
+        (chunk) => onChunkHandler(chunk as StreamChunk),
+        () => {},
+        (error) => {
+          onDisconnectHandler();
+        },
+      );
+      activeDisconnect = cancel;
+      return;
+    }
+  } catch {
+    // Botto not available — fall through to local transport
+  }
+
+  // --- Local transport: existing chrome.runtime messaging ---
   activeDisconnect = openStream(
     {
       type: 'STREAM_CHAT',
-      payload: {
-        question: aiQuestion,
-        history,
-        reviewContext,
-      },
+      payload: chatPayload,
     },
     {
-      onChunk: (chunk: StreamChunk) => {
-        switch (chunk.type) {
-          case 'STREAM_CHAT_DELTA':
-            pendingChatDelta += chunk.payload.content;
-            scheduleDeltaFlush();
-            break;
-
-          case 'STREAM_CHAT_COMPLETE':
-            // Flush any pending delta first
-            if (pendingChatDelta) {
-              flushChatDelta();
-            }
-            useChatStore.getState().completeAssistantMessage(
-              chunk.payload.content,
-              chunk.payload.suggestedQuestions,
-            );
-            activeDisconnect = null;
-            // Persist to cache
-            persistChatToCache();
-            break;
-
-          case 'STREAM_CHAT_ERROR':
-            if (pendingChatDelta) {
-              flushChatDelta();
-            }
-            useChatStore.getState().setError(chunk.payload.error);
-            activeDisconnect = null;
-            break;
-
-          // Ignore review-specific chunks (shouldn't arrive on a chat stream,
-          // but defensive coding in case of protocol mismatch)
-          default:
-            break;
-        }
-      },
-      onDisconnect: () => {
-        const state = useChatStore.getState();
-        if (state.status === 'streaming') {
-          // Flush any remaining delta so partial response is visible
-          if (pendingChatDelta) {
-            flushChatDelta();
-          }
-          state.setError('Connection to Otto lost. Try again.');
-        }
-        activeDisconnect = null;
-      },
+      onChunk: onChunkHandler,
+      onDisconnect: onDisconnectHandler,
     },
   );
 }

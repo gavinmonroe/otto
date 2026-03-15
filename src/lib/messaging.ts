@@ -1,6 +1,11 @@
 // ---------------------------------------------------------------------------
 // Typed message passing — type-safe communication between content script
-// and service worker.
+// and service worker, with optional Botto server routing.
+//
+// When Botto is connected, one-shot messages and streams are routed through
+// the WebSocket instead of chrome.runtime. This centralizes all AI/GitLab
+// calls through the shared server. Falls back to local (chrome.runtime)
+// when Botto is not available.
 //
 // Design decisions:
 // - `sendMessage` is generic over the message type, so the return type is
@@ -9,7 +14,6 @@
 //   ensuring every message type is handled (TypeScript enforces exhaustiveness).
 // - Streaming uses a separate port-based system (see `openStream`).
 // - All errors are caught and returned as Result.ok=false, never thrown.
-//   This prevents unhandled promise rejections in the content script.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -21,26 +25,107 @@ import type {
 } from '@/types/messages';
 
 // ---------------------------------------------------------------------------
-// Content script side — sending messages to the service worker.
+// Botto transport detection
 // ---------------------------------------------------------------------------
 
 /**
- * Send a typed message to the service worker and get a typed response.
+ * Registered Botto client getter — set by the content script on init.
+ * This avoids importing botto-client.ts directly (which would pull it
+ * into the service worker bundle where it can't run).
+ */
+let bottoClientGetter: (() => any) | null = null;
+
+/**
+ * Register a function that returns the connected Botto client.
+ * Called once by the content script after initializing the Botto connection.
+ */
+export function registerBottoTransport(getter: () => any): void {
+  bottoClientGetter = getter;
+}
+
+/**
+ * Check if a Botto client is connected and available for routing.
+ * Returns the client instance or null.
+ */
+function getConnectedBottoClient(): any | null {
+  try {
+    if (!bottoClientGetter) return null;
+    const client = bottoClientGetter();
+    return client?.isConnected() ? client : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Message types that should ALWAYS go through chrome.runtime (local-only).
+ * These are either client-side operations, settings management, or features
+ * that must stay local to the extension (no server-side equivalent).
  *
- * Usage:
- *   const result = await sendMessage({ type: 'GET_SETTINGS' });
- *   // result is Result<OttoSettings>
+ * GitLab API calls stay local because:
+ *   - They use the user's own PAT (not Botto's bot PAT)
+ *   - The service worker returns a specific response shape that callers depend on
+ *   - Botto's handlers return different shapes (raw GitLab API responses)
+ */
+const LOCAL_ONLY_MESSAGES = new Set([
+  'GET_SETTINGS',
+  'SAVE_SETTINGS',
+  'RESOLVE_GITLAB_HOST',
+  'HIGHLIGHT_CODE',
+  'HIGHLIGHT_LINES',
+  'OPEN_OPTIONS',
+  'FETCH_AI_MODELS',
+  'TEST_AI_CONNECTION',
+  'TEST_JIRA_CONNECTION',
+  'FETCH_MR_PREVIEW',
+  'FETCH_MR_PREVIEWS_BATCH',
+  'ANALYZE_COMMENT',
+  // Ticket fetching requires Jira credentials from extension settings.
+  'FETCH_TICKET',
+  'FETCH_TICKET_BATCH',
+  // GitLab API calls — use user's PAT, service worker shapes differ from Botto.
+  'FETCH_PROJECT',
+  'FETCH_MR_METADATA',
+  'FETCH_MR_CHANGES',
+  'FETCH_FILE_CONTENT',
+  'FETCH_FILE_TREE',
+  'FETCH_MR_DISCUSSIONS',
+  'TEST_GITLAB_CONNECTION',
+]);
+
+// ---------------------------------------------------------------------------
+// Content script side — sending messages to the service worker or Botto.
+// ---------------------------------------------------------------------------
+
+/**
+ * Send a typed message to the service worker (or Botto if connected).
+ *
+ * Routing logic:
+ * - Local-only messages always go through chrome.runtime
+ * - When Botto is connected, other messages route through WebSocket
+ * - Falls back to chrome.runtime if Botto send fails
  */
 export async function sendMessage<T extends RequestMessage>(
   message: T,
 ): Promise<MessageResponseMap[T['type']]> {
+  // Check if this message should be routed through Botto
+  if (!LOCAL_ONLY_MESSAGES.has(message.type)) {
+    const botto = getConnectedBottoClient();
+    if (botto) {
+      try {
+        const response = await botto.sendRequest(message as Record<string, unknown>);
+        return response as MessageResponseMap[T['type']];
+      } catch {
+        // Fall through to local transport
+      }
+    }
+  }
+
+  // Local transport: chrome.runtime
   try {
     const response = await chrome.runtime.sendMessage(message);
     return response as MessageResponseMap[T['type']];
   } catch (error) {
-    // If the service worker is not running or the extension context is invalid,
-    // return a generic error result. This handles the case where the extension
-    // was updated while the content script is still running on a page.
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'Message send failed',

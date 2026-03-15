@@ -71,6 +71,18 @@ export type OttoSettings = {
     providers: TicketProvider[];
   };
   preferences: Preferences;
+  botto?: BottoConfig;
+};
+
+/**
+ * Botto server connection config.
+ * When enabled, Otto routes all AI/GitLab calls through Botto instead of
+ * making them directly. Reviews are shared across all connected Ottos.
+ */
+export type BottoConfig = {
+  enabled: boolean;
+  serverUrl: string;    // WebSocket URL, e.g., "wss://botto.example.com/ws"
+  apiKey: string;       // Shared team secret
 };
 
 // ---------------------------------------------------------------------------
@@ -156,4 +168,5 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       behavioralDelta: false,
     },
   },
+  botto: undefined,
 };

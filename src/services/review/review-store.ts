@@ -94,6 +94,18 @@ type ReviewState = {
 
   // Tab health level (set by health monitor on transitions only)
   healthLevel: HealthLevel;
+
+  // Fix jobs — keyed by commentId. Tracks sandbox fix progress per comment.
+  fixJobs: Record<string, FixJobState>;
+};
+
+/** State of a sandbox fix job for a single comment. */
+export type FixJobState = {
+  jobId: string | null;
+  status: 'pending' | 'cloning' | 'setting_up' | 'running' | 'testing' | 'pushing' | 'complete' | 'failed';
+  detail: string;
+  commitSha: string | null;
+  error: string | null;
 };
 
 type ReviewActions = {
@@ -163,6 +175,11 @@ type ReviewActions = {
 
   // Health
   setHealthLevel: (level: HealthLevel) => void;
+
+  // Fix jobs (sandbox auto-fix via Botto)
+  startFixJob: (commentId: string) => void;
+  updateFixJob: (commentId: string, update: Partial<FixJobState>) => void;
+  clearFixJob: (commentId: string) => void;
 };
 
 const INITIAL_STATE: ReviewState = {
@@ -192,6 +209,7 @@ const INITIAL_STATE: ReviewState = {
   followUpStatus: {},
   followUpErrors: {},
   healthLevel: 'normal',
+  fixJobs: {},
 };
 
 export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) => ({
@@ -535,4 +553,34 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
   }),
 
   setHealthLevel: (level) => set({ healthLevel: level }),
+
+  // Fix jobs
+  startFixJob: (commentId) => set((state) => ({
+    fixJobs: {
+      ...state.fixJobs,
+      [commentId]: {
+        jobId: null,
+        status: 'pending',
+        detail: 'Requesting fix...',
+        commitSha: null,
+        error: null,
+      },
+    },
+  })),
+
+  updateFixJob: (commentId, update) => set((state) => {
+    const existing = state.fixJobs[commentId];
+    if (!existing) return {};
+    return {
+      fixJobs: {
+        ...state.fixJobs,
+        [commentId]: { ...existing, ...update },
+      },
+    };
+  }),
+
+  clearFixJob: (commentId) => set((state) => {
+    const { [commentId]: _, ...remaining } = state.fixJobs;
+    return { fixJobs: remaining };
+  }),
 }));

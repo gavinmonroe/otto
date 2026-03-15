@@ -28,6 +28,8 @@ import {
   type CachedReview,
 } from './review-cache';
 import { getHealthLevel, onHealthLevelChange, type HealthLevel } from './health-monitor';
+import { getBottoClient } from '@/lib/botto-client';
+import { loadSettings } from '@/lib/storage';
 
 // ---------------------------------------------------------------------------
 // Delta batching — accumulates streaming deltas and flushes based on
@@ -311,34 +313,56 @@ export function retryReviewTasks(
     (t): t is Exclude<ReviewTask, 'fileActivity'> => t !== 'fileActivity',
   );
 
+  const buildCacheSnapshot = (): CachedReview => {
+    const state = useReviewStore.getState();
+    return {
+      version: 1,
+      projectPath: mrContext.projectPath,
+      mrIid: mrContext.mrIid,
+      diffHash: computeDiffHash(mrContext.diffFiles),
+      timestamp: Date.now(),
+      summary: state.summary,
+      fileReviews: state.fileReviews,
+      relatedFiles: state.relatedFiles,
+      edgeCases: state.edgeCases,
+      fileDiffHashes: computeFileDiffHashes(mrContext.diffFiles),
+      ticketContext: state.ticketContext,
+      ticketKeys: state.ticketKeys,
+      fileActivity: state.fileActivity,
+      acValidation: state.acValidation,
+      verification: state.verification,
+    };
+  };
+
+  // --- Botto transport ---
+  try {
+    const bottoClient = getBottoClient((globalThis as any).__ottoSettings);
+    if (bottoClient?.isConnected()) {
+      const { cancel } = bottoClient.openStream(
+        { type: 'STREAM_REVIEW', mrContext, tasks: streamTasks },
+        (chunk) => {
+          dispatchStreamChunk(chunk as StreamChunk);
+          if ((chunk as any).type === 'STREAM_ALL_COMPLETE') {
+            saveCachedReview(buildCacheSnapshot());
+          }
+        },
+        () => {},
+        (error) => {
+          onDisconnect?.();
+        },
+      );
+      return cancel;
+    }
+  } catch {}
+
+  // --- Local transport ---
   return openStream(
     { type: 'STREAM_REVIEW', payload: { mrContext, tasks: streamTasks } },
     {
       onChunk: (chunk) => {
         dispatchStreamChunk(chunk);
-
-        // Update cache when retry completes
         if (chunk.type === 'STREAM_ALL_COMPLETE') {
-          const state = useReviewStore.getState();
-          const diffHash = computeDiffHash(mrContext.diffFiles);
-          const cached: CachedReview = {
-            version: 1,
-            projectPath: mrContext.projectPath,
-            mrIid: mrContext.mrIid,
-            diffHash,
-            timestamp: Date.now(),
-            summary: state.summary,
-            fileReviews: state.fileReviews,
-            relatedFiles: state.relatedFiles,
-            edgeCases: state.edgeCases,
-            fileDiffHashes: computeFileDiffHashes(mrContext.diffFiles),
-            ticketContext: state.ticketContext,
-            ticketKeys: state.ticketKeys,
-            fileActivity: state.fileActivity,
-            acValidation: state.acValidation,
-            verification: state.verification,
-          };
-          saveCachedReview(cached);
+          saveCachedReview(buildCacheSnapshot());
         }
       },
       onDisconnect: () => {
@@ -374,35 +398,65 @@ export function startReviewStream(
     (t): t is Exclude<ReviewTask, 'fileActivity'> => t !== 'fileActivity',
   );
 
+  const buildCacheSnapshot = (): CachedReview => {
+    const state = useReviewStore.getState();
+    return {
+      version: 1,
+      projectPath: mrContext.projectPath,
+      mrIid: mrContext.mrIid,
+      diffHash: computeDiffHash(mrContext.diffFiles),
+      timestamp: Date.now(),
+      summary: state.summary,
+      fileReviews: state.fileReviews,
+      relatedFiles: state.relatedFiles,
+      edgeCases: state.edgeCases,
+      fileDiffHashes: computeFileDiffHashes(mrContext.diffFiles),
+      ticketContext: state.ticketContext,
+      ticketKeys: state.ticketKeys,
+      fileActivity: state.fileActivity,
+      acValidation: state.acValidation,
+      verification: state.verification,
+    };
+  };
+
+  const handleComplete = () => saveCachedReview(buildCacheSnapshot());
+
+  // --- Botto transport: route through WebSocket if connected ---
+  try {
+    const bottoClient = getBottoClient((globalThis as any).__ottoSettings);
+
+    if (bottoClient?.isConnected()) {
+      bottoClient.viewingMr(mrContext.projectPath, mrContext.mrIid);
+
+      const { cancel } = bottoClient.openStream(
+        { type: 'STREAM_REVIEW', mrContext, tasks: streamTasks, skipCache: !!skipCache },
+        (chunk) => {
+          dispatchStreamChunk(chunk as StreamChunk);
+          if ((chunk as any).type === 'STREAM_ALL_COMPLETE') handleComplete();
+        },
+        () => {},
+        (error) => {
+          const state = useReviewStore.getState();
+          if (state.status === 'loading' || state.status === 'streaming') {
+            state.setError(`Botto connection lost: ${error}`);
+          }
+          onDisconnect?.();
+        },
+      );
+
+      return cancel;
+    }
+  } catch {
+    // Botto not available — fall through to local transport
+  }
+
+  // --- Local transport: existing chrome.runtime messaging ---
   return openStream(
     { type: 'STREAM_REVIEW', payload: { mrContext, tasks: streamTasks } },
     {
       onChunk: (chunk) => {
         dispatchStreamChunk(chunk);
-
-        // Save to cache when all tasks complete
-        if (chunk.type === 'STREAM_ALL_COMPLETE') {
-          const state = useReviewStore.getState();
-          const diffHash = computeDiffHash(mrContext.diffFiles);
-          const cached: CachedReview = {
-            version: 1,
-            projectPath: mrContext.projectPath,
-            mrIid: mrContext.mrIid,
-            diffHash,
-            timestamp: Date.now(),
-            summary: state.summary,
-            fileReviews: state.fileReviews,
-            relatedFiles: state.relatedFiles,
-            edgeCases: state.edgeCases,
-            fileDiffHashes: computeFileDiffHashes(mrContext.diffFiles),
-            ticketContext: state.ticketContext,
-            ticketKeys: state.ticketKeys,
-            fileActivity: state.fileActivity,
-            acValidation: state.acValidation,
-            verification: state.verification,
-          };
-          saveCachedReview(cached);
-        }
+        if (chunk.type === 'STREAM_ALL_COMPLETE') handleComplete();
       },
       onDisconnect: () => {
         const state = useReviewStore.getState();

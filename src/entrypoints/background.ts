@@ -45,6 +45,157 @@ import {
 import { computePriority } from '@/services/review-queue/priority-scorer';
 import type { QueuedReview } from '@/types/review-queue';
 
+// ---------------------------------------------------------------------------
+// Botto Bridge — WebSocket relay for content scripts.
+//
+// The actual WebSocket lives here (service worker has its own origin,
+// not subject to page CSP). Content scripts communicate via chrome.runtime
+// ports. The port also keeps the service worker alive.
+// ---------------------------------------------------------------------------
+
+let bottoWs: WebSocket | null = null;
+let bottoState: string = 'disconnected';
+const bottoPorts = new Set<chrome.runtime.Port>();
+let bottoReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let bottoReconnectAttempt = 0;
+let bottoIntentionalClose = false;
+let bottoServerUrl = '';
+let bottoApiKey = '';
+let bottoUserId = '';
+// Cache the last AUTH_OK message so new ports get it immediately
+let bottoLastAuthOk: string | null = null;
+let bottoKeepaliveInterval: ReturnType<typeof setInterval> | null = null;
+
+function bottoBroadcast(msg: Record<string, unknown>) {
+  for (const port of bottoPorts) {
+    try { port.postMessage(msg); } catch {}
+  }
+}
+
+function bottoSetState(state: string) {
+  bottoState = state;
+  bottoBroadcast({ type: 'BOTTO_STATE', state });
+}
+
+function bottoConnect() {
+  if (!bottoServerUrl || bottoWs?.readyState === WebSocket.OPEN || bottoWs?.readyState === WebSocket.CONNECTING) return;
+
+  bottoIntentionalClose = false;
+  bottoSetState('connecting');
+
+  // Start keepalive — Chrome MV3 kills service workers after ~30s of inactivity.
+  // A periodic self-ping keeps it alive while the WebSocket is active.
+  if (!bottoKeepaliveInterval) {
+    bottoKeepaliveInterval = setInterval(() => {
+      // Any activity keeps the SW alive. Sending a no-op message to ourselves works.
+      if (bottoWs?.readyState === WebSocket.OPEN) {
+        // The WebSocket activity itself counts, but we also ping ports
+        for (const port of bottoPorts) {
+          try { port.postMessage({ type: 'BOTTO_KEEPALIVE' }); } catch {}
+        }
+      }
+    }, 20_000); // Every 20s — well under Chrome's 30s kill threshold
+  }
+
+  try {
+    bottoWs = new WebSocket(bottoServerUrl);
+  } catch (e) {
+    bottoSetState('error');
+    bottoBroadcast({ type: 'BOTTO_ERROR', error: `failed to create WebSocket: ${e}` });
+    bottoScheduleReconnect();
+    return;
+  }
+
+  bottoWs.onopen = () => {
+    bottoWs!.send(JSON.stringify({
+      type: 'AUTH',
+      api_key: bottoApiKey,
+      user_id: bottoUserId,
+    }));
+  };
+
+  bottoWs.onmessage = (event) => {
+    const raw = typeof event.data === 'string' ? event.data : '';
+    try {
+      const msg = JSON.parse(raw);
+      if (msg.type === 'AUTH_OK') {
+        bottoReconnectAttempt = 0;
+        bottoLastAuthOk = raw;
+        bottoSetState('connected');
+      } else if (msg.type === 'AUTH_ERROR') {
+        bottoSetState('error');
+        bottoBroadcast({ type: 'BOTTO_ERROR', error: msg.error || 'auth failed' });
+        bottoIntentionalClose = true;
+        bottoWs?.close();
+        return;
+      }
+    } catch {}
+    bottoBroadcast({ type: 'BOTTO_MESSAGE', data: raw });
+  };
+
+  bottoWs.onclose = () => {
+    bottoWs = null;
+    if (!bottoIntentionalClose) {
+      bottoSetState('disconnected');
+      bottoScheduleReconnect();
+    } else {
+      bottoSetState('disconnected');
+    }
+  };
+
+  bottoWs.onerror = () => {};
+}
+
+function bottoDisconnect() {
+  bottoIntentionalClose = true;
+  if (bottoReconnectTimer) { clearTimeout(bottoReconnectTimer); bottoReconnectTimer = null; }
+  if (bottoKeepaliveInterval) { clearInterval(bottoKeepaliveInterval); bottoKeepaliveInterval = null; }
+  bottoReconnectAttempt = 0;
+  bottoWs?.close();
+  bottoWs = null;
+  bottoSetState('disconnected');
+}
+
+function bottoScheduleReconnect() {
+  if (bottoIntentionalClose || bottoPorts.size === 0) return;
+  const delay = Math.min(1000 * Math.pow(2, bottoReconnectAttempt), 30000);
+  bottoReconnectAttempt++;
+  bottoReconnectTimer = setTimeout(() => {
+    bottoReconnectTimer = null;
+    if (bottoPorts.size > 0 && !bottoIntentionalClose) bottoConnect();
+  }, delay);
+}
+
+function handleBottoPort(port: chrome.runtime.Port) {
+  bottoPorts.add(port);
+  port.postMessage({ type: 'BOTTO_STATE', state: bottoState });
+
+  port.onMessage.addListener((msg) => {
+    if (msg.type === 'BOTTO_CONNECT') {
+      bottoServerUrl = msg.serverUrl;
+      bottoApiKey = msg.apiKey;
+      bottoUserId = msg.userId;
+      // If already connected and authenticated, replay AUTH_OK immediately
+      if (bottoWs?.readyState === WebSocket.OPEN && bottoState === 'connected' && bottoLastAuthOk) {
+        port.postMessage({ type: 'BOTTO_MESSAGE', data: bottoLastAuthOk });
+      } else {
+        bottoConnect();
+      }
+    } else if (msg.type === 'BOTTO_DISCONNECT') {
+      bottoDisconnect();
+    } else if (msg.type === 'BOTTO_SEND') {
+      if (bottoWs?.readyState === WebSocket.OPEN) bottoWs.send(msg.data);
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    bottoPorts.delete(port);
+    if (bottoPorts.size === 0) {
+      setTimeout(() => { if (bottoPorts.size === 0) bottoDisconnect(); }, 5000);
+    }
+  });
+}
+
 export default defineBackground(() => {
   // -----------------------------------------------------------------
   // One-shot message handlers
@@ -606,7 +757,9 @@ export default defineBackground(() => {
   // -----------------------------------------------------------------
 
   chrome.runtime.onConnect.addListener((port) => {
-    if (port.name.startsWith('otto-queue:')) {
+    if (port.name === 'botto') {
+      handleBottoPort(port);
+    } else if (port.name.startsWith('otto-queue:')) {
       registerPort(port);
     }
   });
