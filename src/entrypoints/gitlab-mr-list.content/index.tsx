@@ -15,6 +15,8 @@ import { MrEnhancedStrip } from '@/components/mr-list/MrEnhancedStrip';
 import { TicketGroupHeader } from '@/components/mr-list/TicketGroupHeader';
 import { MrListToolbar } from '@/components/mr-list/MrListToolbar';
 import { QueueStatusBar } from '@/components/mr-list/QueueStatusBar';
+import { TeamDigestBanner } from '@/components/mr-list/TeamDigestBanner';
+import type { TeamDigest } from '@/components/mr-list/TeamDigestBanner';
 import { computePriority } from '@/services/review-queue/priority-scorer';
 import { groupMrsByTicket, enrichGroups } from '@/services/review-queue/ticket-grouper';
 import type { MrPreviewData } from '@/types/mr-preview';
@@ -26,6 +28,8 @@ import type {
   ReviewPriority,
 } from '@/types/review-queue';
 import type { ReviewTask } from '@/services/review/review-types';
+import { getBottoClient, disconnectBotto } from '@/lib/botto-client';
+import { registerBottoTransport } from '@/lib/messaging';
 export default defineContentScript({
   matches: ['*://*/*'],
   runAt: 'document_idle',
@@ -40,6 +44,49 @@ export default defineContentScript({
 
     // Cache enabled features for building task lists when enqueuing
     cachedEnabledFeatures = settings.preferences.enabledFeatures ?? null;
+
+    // Resolve GitLab username before creating Botto client
+    let gitlabUsername: string | undefined;
+    const host = settings.gitlab.hosts[0];
+    if (host) {
+      gitlabUsername = host.username;
+      if (!gitlabUsername) {
+        try {
+          const testResult = await sendMessage({
+            type: 'TEST_GITLAB_CONNECTION',
+            payload: { host },
+          });
+          if (testResult.ok) {
+            const data = testResult.data as { username?: string };
+            if (data?.username) {
+              gitlabUsername = data.username;
+              // Persist so we never need this API call again
+              host.username = gitlabUsername;
+              sendMessage({
+                type: 'SAVE_SETTINGS',
+                payload: settings,
+              }).catch(() => {});
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // Initialize Botto client if configured (needed for digest feature)
+    const bottoClient = getBottoClient(settings, gitlabUsername);
+    if (bottoClient) {
+      try {
+        await bottoClient.connect();
+        registerBottoTransport(() => bottoClient);
+      } catch {
+        // Botto not available — digest won't load, everything else works
+      }
+    }
+
+    // Clean up Botto on invalidation
+    ctx.onInvalidated(() => {
+      disconnectBotto();
+    });
 
     // If queue feature is enabled, run the full command center.
     // Otherwise, fall back to basic preview strips only.
@@ -91,6 +138,8 @@ let suppressObserver = false;
 let rerenderToolbar: (() => void) | null = null;
 /** Cached settings for building task lists */
 let cachedEnabledFeatures: Record<string, boolean> | null = null;
+/** Mounted digest banner */
+let mountedDigest: MountedComponent | null = null;
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -232,6 +281,9 @@ async function initMrListCommandCenter(
     rerenderAllStrips(rows, mountContext, ctx);
     renderStatusBar(mountContext, ctx);
   }
+
+  // Fetch and mount team digest banner (Botto-only, non-blocking)
+  fetchAndMountDigest(mountContext, ctx);
   // Watch for new rows (pagination, infinite scroll)
   const listContainer = document.querySelector('.issuable-list')
     || document.querySelector('.mr-list')
@@ -1060,6 +1112,131 @@ function handleCancelAll(mountContext: MountContext): void {
   }
 }
 // ---------------------------------------------------------------------------
+// Team digest — fetched from Botto, cached client-side
+// ---------------------------------------------------------------------------
+
+const DIGEST_CACHE_KEY = 'otto_digest_cache';
+const DIGEST_DISMISS_KEY = 'otto_digest_dismissed';
+
+async function fetchAndMountDigest(
+  mountContext: MountContext,
+  ctx: typeof ContentScriptContext.prototype,
+): Promise<void> {
+  const settings = await loadSettings();
+  const bottoClient = getBottoClient(settings);
+  if (!bottoClient?.isConnected()) return;
+
+  const userId = settings.gitlab.hosts[0]?.username ?? 'unknown';
+
+  // Check if user dismissed this period's digest
+  try {
+    const stored = await chrome.storage.local.get(DIGEST_DISMISS_KEY);
+    const dismissed = stored[DIGEST_DISMISS_KEY];
+    if (dismissed?.project === mountContext.projectPath) {
+      const age = Date.now() - (dismissed.at ?? 0);
+      // Daily: don't re-show for 20 hours. Weekly: don't re-show for 5 days.
+      const ttl = dismissed.period === 'daily' ? 20 * 3600_000 : 5 * 86400_000;
+      if (age < ttl) return;
+    }
+  } catch {}
+
+  // Check client-side cache first (1 hour TTL)
+  let digest: TeamDigest | null = null;
+  try {
+    const stored = await chrome.storage.local.get(DIGEST_CACHE_KEY);
+    const cached = stored[DIGEST_CACHE_KEY];
+    if (
+      cached?.project === mountContext.projectPath &&
+      Date.now() - (cached.fetchedAt ?? 0) < 3600_000
+    ) {
+      digest = cached.digest;
+    }
+  } catch {}
+
+  // Fetch from Botto if not cached
+  if (!digest) {
+    try {
+      const result = await bottoClient.sendRequest<{ ok: boolean; data: TeamDigest }>({
+        type: 'GET_TEAM_DIGEST',
+        project_path: mountContext.projectPath,
+        period: 'weekly',
+      });
+      if (result && (result as any).ok && (result as any).data) {
+        digest = (result as any).data;
+        // Cache client-side
+        chrome.storage.local.set({
+          [DIGEST_CACHE_KEY]: {
+            project: mountContext.projectPath,
+            digest,
+            fetchedAt: Date.now(),
+          },
+        }).catch(() => {});
+      }
+    } catch {
+      // Botto request failed — skip digest silently
+      return;
+    }
+  }
+
+  if (!digest || (digest.team_stats.mrs_merged === 0 && digest.team_stats.mrs_open === 0)) {
+    return; // Nothing to show
+  }
+
+  // Mount the banner above the toolbar (or above the list)
+  const anchor = document.querySelector('[data-otto-toolbar]')
+    || document.querySelector('.issuable-list')
+    || document.querySelector('.mr-list')
+    || document.querySelector('[data-testid="issuable-list"]');
+  if (!anchor?.parentElement) return;
+
+  const container = document.createElement('div');
+  container.setAttribute('data-otto-digest', 'true');
+  anchor.parentElement.insertBefore(container, anchor);
+
+  const shadow = container.attachShadow({ mode: 'open' });
+  const styleEl = document.createElement('style');
+  styleEl.textContent = getResetStyles();
+  shadow.appendChild(styleEl);
+
+  const mountPoint = document.createElement('div');
+  shadow.appendChild(mountPoint);
+
+  const root = createRoot(mountPoint);
+  const finalDigest = digest;
+
+  root.render(
+    createElement(ThemeProvider, {
+      isDark: mountContext.isDark,
+      children: createElement(TeamDigestBanner, {
+        digest: finalDigest,
+        userId,
+        onDismiss: () => {
+          root.unmount();
+          container.remove();
+          mountedDigest = null;
+          // Remember dismissal
+          chrome.storage.local.set({
+            [DIGEST_DISMISS_KEY]: {
+              project: mountContext.projectPath,
+              period: finalDigest.period,
+              at: Date.now(),
+            },
+          }).catch(() => {});
+        },
+      }),
+    }),
+  );
+
+  mountedDigest = { container, root };
+
+  ctx.signal.addEventListener('abort', () => {
+    root.unmount();
+    container.remove();
+    mountedDigest = null;
+  }, { once: true });
+}
+
+// ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
 function removeAll(): void {
@@ -1083,6 +1260,11 @@ function removeAll(): void {
     mountedStatusBar.root.unmount();
     mountedStatusBar.container.remove();
     mountedStatusBar = null;
+  }
+  if (mountedDigest) {
+    mountedDigest.root.unmount();
+    mountedDigest.container.remove();
+    mountedDigest = null;
   }
   disconnectQueuePort();
 }

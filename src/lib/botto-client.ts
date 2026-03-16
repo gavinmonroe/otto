@@ -155,6 +155,13 @@ export class BottoClient {
       this.authTimeout = null;
     }
 
+    // Clear presence throttle
+    if (this._viewingFilesTimer) {
+      clearTimeout(this._viewingFilesTimer);
+      this._viewingFilesTimer = null;
+      this._pendingFiles = null;
+    }
+
     this.port?.postMessage({ type: 'BOTTO_DISCONNECT' });
     this.port?.disconnect();
     this.port = null;
@@ -276,6 +283,34 @@ export class BottoClient {
   leftMr(): void {
     if (!this.isConnected()) return;
     this.send({ type: 'LEFT_MR' });
+  }
+
+  /**
+   * Send file-level presence update. Throttled to max once per 3s (trailing edge)
+   * to avoid spamming the WebSocket during rapid scrolling. The server has an
+   * additional 2s rate limit as a safety net.
+   */
+  private _viewingFilesTimer: ReturnType<typeof setTimeout> | null = null;
+  private _pendingFiles: Array<{ path: string; first_line?: number; last_line?: number }> | null = null;
+
+  viewingFiles(files: Array<{ path: string; first_line?: number; last_line?: number }>): void {
+    if (!this.isConnected()) return;
+
+    this._pendingFiles = files;
+
+    // Trailing-edge throttle: always schedule, but only send after 3s of quiet
+    if (this._viewingFilesTimer) return;
+
+    this._viewingFilesTimer = setTimeout(() => {
+      this._viewingFilesTimer = null;
+      if (this._pendingFiles && this.isConnected()) {
+        this.send({
+          type: 'VIEWING_FILES',
+          files: this._pendingFiles,
+        });
+        this._pendingFiles = null;
+      }
+    }, 3000);
   }
 
   // -------------------------------------------------------------------------
@@ -510,8 +545,11 @@ let instance: BottoClient | null = null;
  * Get or create the Botto client singleton. Returns null if Botto is not configured.
  * Always returns the existing instance if one exists — callers check isConnected().
  * This prevents replacing a connected instance with a new disconnected one.
+ *
+ * @param userId — explicit user ID override. If not provided, falls back to
+ *   settings.gitlab.hosts[0].username or 'unknown'.
  */
-export function getBottoClient(settings: OttoSettings): BottoClient | null {
+export function getBottoClient(settings: OttoSettings, userId?: string): BottoClient | null {
   if (!settings.botto?.enabled || !settings.botto?.serverUrl) {
     return null;
   }
@@ -520,13 +558,16 @@ export function getBottoClient(settings: OttoSettings): BottoClient | null {
     return instance;
   }
 
-  // Determine user ID from the first GitLab host's username
-  const userId = settings.gitlab.hosts[0]?.username ?? 'unknown';
+  const resolvedUserId = userId
+    || settings.gitlab.hosts[0]?.username
+    || 'unknown';
+
+  console.log('[otto] Botto userId resolved to:', resolvedUserId);
 
   instance = new BottoClient(
     settings.botto.serverUrl,
     settings.botto.apiKey ?? '',
-    userId,
+    resolvedUserId,
   );
 
   return instance;

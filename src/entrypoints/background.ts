@@ -182,7 +182,13 @@ function handleBottoPort(port: chrome.runtime.Port) {
         bottoConnect();
       }
     } else if (msg.type === 'BOTTO_DISCONNECT') {
-      bottoDisconnect();
+      // Don't tear down the shared WebSocket — other tabs may still be using it.
+      // Just remove this port. The onDisconnect handler (below) will close the
+      // WebSocket after a 5s grace period if no ports remain.
+      bottoPorts.delete(port);
+      if (bottoPorts.size === 0) {
+        setTimeout(() => { if (bottoPorts.size === 0) bottoDisconnect(); }, 5000);
+      }
     } else if (msg.type === 'BOTTO_SEND') {
       if (bottoWs?.readyState === WebSocket.OPEN) bottoWs.send(msg.data);
     }

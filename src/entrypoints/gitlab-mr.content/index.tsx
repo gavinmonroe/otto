@@ -42,6 +42,23 @@ import { HealthWarningToast } from '@/components/review/HealthWarningToast';
 import { guardedMutation } from '@/lib/dom-guard';
 import { getBottoClient, disconnectBotto } from '@/lib/botto-client';
 import { registerBottoTransport } from '@/lib/messaging';
+import { usePresenceStore } from '@/services/presence/presence-store';
+import { startViewportTracker } from '@/services/presence/viewport-tracker';
+import { startPresenceInjection } from '@/services/presence/presence-injector';
+
+// Presence cleanup functions — stored at module level so the SPA navigation
+// handler can tear them down. ctx.signal only fires on content script
+// invalidation (extension update, full page nav), NOT on SPA transitions.
+let cleanupViewportTracker: (() => void) | null = null;
+let cleanupPresenceInjector: (() => void) | null = null;
+
+function teardownPresence(): void {
+  cleanupViewportTracker?.();
+  cleanupViewportTracker = null;
+  cleanupPresenceInjector?.();
+  cleanupPresenceInjector = null;
+  usePresenceStore.getState().reset();
+}
 
 export default defineContentScript({
   matches: ['*://*/*'],
@@ -72,7 +89,38 @@ export default defineContentScript({
     // Store settings on globalThis so stream-dispatcher can access them synchronously.
     if (settings) {
       (globalThis as any).__ottoSettings = settings;
-      const bottoClient = getBottoClient(settings);
+
+      // Resolve the current GitLab username via API before creating the Botto client.
+      // This is the only reliable method — content scripts can't access page JS globals
+      // and meta tags vary by GitLab version. The result is persisted back to settings
+      // so subsequent page loads skip the API call entirely.
+      let gitlabUsername: string | undefined;
+      const host = settings.gitlab.hosts[0];
+      if (host) {
+        gitlabUsername = host.username;
+        if (!gitlabUsername) {
+          try {
+            const testResult = await sendMessage({
+              type: 'TEST_GITLAB_CONNECTION',
+              payload: { host },
+            });
+            if (testResult.ok) {
+              const data = testResult.data as { username?: string };
+              if (data?.username) {
+                gitlabUsername = data.username;
+                // Persist so we never need this API call again
+                host.username = gitlabUsername;
+                sendMessage({
+                  type: 'SAVE_SETTINGS',
+                  payload: settings,
+                }).catch(() => {});
+              }
+            }
+          } catch {}
+        }
+      }
+
+      const bottoClient = getBottoClient(settings, gitlabUsername);
       if (bottoClient) {
         try {
           await bottoClient.connect();
@@ -97,6 +145,15 @@ export default defineContentScript({
       const bottoClient = settings ? getBottoClient(settings) : null;
       if (bottoClient?.isConnected()) {
         bottoClient.viewingMr(lightContext.projectPath, lightContext.mrIid);
+
+        // Clear stale presence data if Botto disconnects (server goes down,
+        // network drop, etc). Without this, avatar dots from the last known
+        // state persist indefinitely until page refresh.
+        bottoClient.onConnectionChange((state) => {
+          if (state === 'disconnected') {
+            usePresenceStore.getState().reset();
+          }
+        });
 
         // Listen for broadcast messages from other Ottos
         bottoClient.onMessage('COMMENT_ACTION_BROADCAST', (msg: any) => {
@@ -157,6 +214,41 @@ export default defineContentScript({
             );
           }
         });
+
+        // Presence: file-level viewer tracking
+        bottoClient.onMessage('PRESENCE_UPDATE', (msg: any) => {
+          if (msg.user_id && Array.isArray(msg.files)) {
+            const files = msg.files.map((f: any) => ({
+              path: f.path,
+              firstLine: f.first_line,
+              lastLine: f.last_line,
+            }));
+            usePresenceStore.getState().updateViewer(
+              msg.user_id,
+              files,
+              msg.display_name ?? undefined,
+              msg.avatar_url ?? undefined,
+            );
+          }
+        });
+
+        bottoClient.onMessage('PRESENCE_SNAPSHOT', (msg: any) => {
+          if (Array.isArray(msg.viewers)) {
+            const viewers = msg.viewers
+              .filter((v: any) => v.user_id && Array.isArray(v.files))
+              .map((v: any) => ({
+                userId: v.user_id,
+                displayName: v.display_name ?? undefined,
+                avatarUrl: v.avatar_url ?? undefined,
+                files: v.files.map((f: any) => ({
+                  path: f.path,
+                  firstLine: f.first_line,
+                  lastLine: f.last_line,
+                })),
+              }));
+            usePresenceStore.getState().setSnapshot(viewers);
+          }
+        });
       }
     }
 
@@ -183,13 +275,23 @@ export default defineContentScript({
         if (bottoClient?.isConnected()) {
           bottoClient.leftMr();
         }
+
+        // Tear down presence features (viewport tracker, injector, store)
+        teardownPresence();
+
         // Disconnect queue port for the old MR — prevents stale chunks
         disconnectMrQueuePort();
         useReviewStore.getState().reset();
         useChatStore.getState().reset();
+
         const newContext = await buildMrContext(false);
         if (newContext) {
           useReviewStore.getState().setMrContext(newContext);
+
+          // Re-notify Botto we're viewing the new MR (triggers PRESENCE_SNAPSHOT + CACHED_REVIEW)
+          if (bottoClient?.isConnected()) {
+            bottoClient.viewingMr(newContext.projectPath, newContext.mrIid);
+          }
         }
       }
     });
@@ -244,6 +346,20 @@ async function initDiffsFeatures(
   // Related files sidebar — only start if relatedFiles is enabled
   if (enabled?.relatedFiles !== false) {
     startRelatedFilesSidebar(isDarkMode, ctx.signal);
+  }
+
+  // Presence: file-level viewer avatars + viewport tracking.
+  // Only starts when Botto is connected — no local fallback needed.
+  // Store cleanup functions at module level so the SPA navigation handler
+  // can tear them down — ctx.signal only fires on content script invalidation,
+  // not on SPA transitions between MRs.
+  const settings = (globalThis as any).__ottoSettings as OttoSettings | undefined;
+  const bottoClient = settings ? getBottoClient(settings) : null;
+  if (bottoClient?.isConnected()) {
+    // Tear down any previous presence from a prior SPA navigation
+    teardownPresence();
+    cleanupPresenceInjector = startPresenceInjection(isDarkMode, ctx.signal);
+    cleanupViewportTracker = startViewportTracker(bottoClient, ctx.signal);
   }
 
   // Keyboard shortcuts always active (they navigate existing UI)
