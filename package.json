@@ -10,7 +10,8 @@
     "build:firefox": "wxt build --browser firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip --browser firefox",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "test": "vitest --run"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
@@ -33,6 +34,7 @@
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
+    "vitest": "^4.1.0",
     "wxt": "^0.20.18"
   }
 }

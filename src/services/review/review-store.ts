@@ -108,6 +108,18 @@ export type FixJobState = {
   error: string | null;
 };
 
+/** Human-readable labels for fix pipeline stages. */
+export const FIX_STAGE_LABELS: Record<FixJobState['status'], string> = {
+  pending: 'Requesting fix...',
+  cloning: 'Cloning repository...',
+  setting_up: 'Installing dependencies...',
+  running: 'Applying fix...',
+  testing: 'Running tests...',
+  pushing: 'Pushing to branch...',
+  complete: 'Fix applied',
+  failed: 'Fix failed',
+};
+
 type ReviewActions = {
   // Initialization
   setMrContext: (context: MrContext) => void;

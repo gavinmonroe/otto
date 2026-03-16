@@ -318,6 +318,7 @@ export class BottoClient {
     targetBranch?: string,
     startLine?: number | null,
     endLine?: number | null,
+    gitlabNoteId?: number | null,
   ): void {
     if (!this.isConnected()) return;
     this.send({
@@ -335,6 +336,7 @@ export class BottoClient {
       target_branch: targetBranch ?? null,
       start_line: startLine ?? null,
       end_line: endLine ?? null,
+      gitlab_note_id: gitlabNoteId ?? null,
     });
   }
 

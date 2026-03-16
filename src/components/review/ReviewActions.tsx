@@ -13,24 +13,12 @@ import { MessageSquare, Wrench, Loader2, Check, X } from 'lucide-react';
 import type { ReviewComment, ReviewCommentStatus } from '@/types/review';
 import { useTheme } from '@/components/ThemeContext';
 import { useChatStore } from '@/services/chat/chat-store';
-import { useReviewStore, type FixJobState } from '@/services/review/review-store';
+import { useReviewStore, FIX_STAGE_LABELS, type FixJobState } from '@/services/review/review-store';
 import { getBottoClient } from '@/lib/botto-client';
 
 type ReviewActionsProps = {
   comment: ReviewComment;
   onUpdateStatus: (commentId: string, status: ReviewCommentStatus, editedBody?: string) => void;
-};
-
-/** Human-readable labels for fix pipeline stages. */
-const FIX_STAGE_LABELS: Record<FixJobState['status'], string> = {
-  pending: 'Requesting fix...',
-  cloning: 'Cloning repository...',
-  setting_up: 'Installing dependencies...',
-  running: 'Applying fix...',
-  testing: 'Running tests...',
-  pushing: 'Pushing to branch...',
-  complete: 'Fix applied',
-  failed: 'Fix failed',
 };
 
 export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {

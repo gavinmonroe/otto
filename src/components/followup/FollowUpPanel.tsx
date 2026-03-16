@@ -16,13 +16,15 @@
 // - Inline styles + shadow DOM for CSS isolation, same as all Otto UI.
 // ---------------------------------------------------------------------------
 
-import { useState, useCallback } from 'react';
-import { MessageSquare, Code, Smile, Copy, Check, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { MessageSquare, Code, Smile, Copy, Check, ChevronDown, ChevronRight, X, Wrench, Loader2 } from 'lucide-react';
 import { useTheme, type OttoTheme } from '@/components/ThemeContext';
 import { Markdown } from '@/components/Markdown';
 import { SuggestionDiff } from '@/components/SuggestionDiff';
 import { OttoLogo } from '@/components/OttoLogo';
-import type { FollowUpAnalysis, CommentIntent, FollowUpAction } from '@/types/followup';
+import { useReviewStore, FIX_STAGE_LABELS } from '@/services/review/review-store';
+import { getBottoClient } from '@/lib/botto-client';
+import type { FollowUpAnalysis, CommentIntent, FollowUpAction, FileChange } from '@/types/followup';
 
 type FollowUpPanelProps = {
   analysis: FollowUpAnalysis;
@@ -80,7 +82,7 @@ export function FollowUpPanel({ analysis, onDismiss }: FollowUpPanelProps) {
           </Section>
 
           {/* Recommended Action */}
-          <ActionSection action={analysis.recommendedAction} theme={theme} />
+          <ActionSection action={analysis.recommendedAction} commentId={analysis.commentId} theme={theme} />
         </div>
       )}
     </div>
@@ -123,7 +125,7 @@ function Section({ icon, title, theme, children }: {
   );
 }
 
-function ActionSection({ action, theme }: { action: FollowUpAction; theme: OttoTheme }) {
+function ActionSection({ action, commentId, theme }: { action: FollowUpAction; commentId: string; theme: OttoTheme }) {
   if (action.type === 'emoji') {
     return (
       <Section
@@ -203,6 +205,12 @@ function ActionSection({ action, theme }: { action: FollowUpAction; theme: OttoT
               filePath={change.filePath}
               startLine={change.startLine}
             />
+            <FollowUpFixButton
+              change={change}
+              commentId={commentId}
+              changeIndex={i}
+              theme={theme}
+            />
           </div>
         ))}
       </Section>
@@ -210,6 +218,184 @@ function ActionSection({ action, theme }: { action: FollowUpAction; theme: OttoT
   }
 
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// FollowUpFixButton — triggers a sandbox fix for a single FileChange.
+// Same pattern as ReviewActions fix button, but scoped to follow-up changes.
+// Uses a composite key (followup-{noteId}-{idx}) so fix job tracking
+// doesn't collide with review comment fix jobs.
+// ---------------------------------------------------------------------------
+
+function FollowUpFixButton({ change, commentId, changeIndex, theme }: {
+  change: FileChange;
+  commentId: string;
+  changeIndex: number;
+  theme: OttoTheme;
+}) {
+  // Stable key for this specific change's fix job
+  const fixKey = `followup-${commentId}-${changeIndex}`;
+
+  const fixJob = useReviewStore((s) => s.fixJobs[fixKey]);
+  const mrContext = useReviewStore((s) => s.mrContext);
+
+  // Track Botto connection state reactively
+  const [bottoConnected, setBottoConnected] = useState(() => {
+    try {
+      const settings = (globalThis as any).__ottoSettings;
+      const client = getBottoClient(settings);
+      return client?.isConnected() ?? false;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const settings = (globalThis as any).__ottoSettings;
+      const client = getBottoClient(settings);
+      if (!client) return;
+      return client.onConnectionChange((state) => {
+        setBottoConnected(state === 'connected');
+      });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const canFix = (() => {
+    if (!change.originalCode || !change.suggestedCode) return false;
+    if (!bottoConnected) return false;
+    try {
+      const settings = (globalThis as any).__ottoSettings;
+      const client = getBottoClient(settings);
+      const caps = client?.getCapabilities();
+      return caps?.sandbox_enabled ?? false;
+    } catch {
+      return false;
+    }
+  })();
+
+  const handleFix = useCallback(() => {
+    if (!mrContext) return;
+
+    const settings = (globalThis as any).__ottoSettings;
+    const bottoClient = getBottoClient(settings);
+    if (!bottoClient?.isConnected()) return;
+
+    // Start tracking in the store
+    useReviewStore.getState().startFixJob(fixKey);
+
+    // Parse the GitLab note ID from the commentId for reply threading
+    const gitlabNoteId = parseInt(commentId, 10);
+
+    bottoClient.requestFix(
+      mrContext.projectPath,
+      mrContext.mrIid,
+      fixKey,                       // comment_id — used for fix job tracking
+      change.suggestedCode,         // suggestion
+      change.filePath,              // file_path
+      change.originalCode,          // original_code
+      mrContext.sourceBranch,
+      change.explanation,           // comment_body — context for the AI
+      `Follow-up fix: ${change.filePath}`, // comment_title
+      undefined,                    // severity
+      mrContext.targetBranch,
+      change.startLine > 0 ? change.startLine : undefined,
+      change.endLine > 0 ? change.endLine : undefined,
+      isNaN(gitlabNoteId) ? undefined : gitlabNoteId,
+    );
+  }, [change, commentId, fixKey, mrContext]);
+
+  const btnBase: React.CSSProperties = {
+    padding: '2px 8px',
+    borderRadius: '3px',
+    fontSize: '11px',
+    cursor: 'pointer',
+    border: `1px solid ${theme.border}`,
+    background: 'transparent',
+    color: theme.brandText,
+  };
+
+  // Fix in progress or completed — show inline status
+  if (fixJob) {
+    const label = fixJob.detail || FIX_STAGE_LABELS[fixJob.status] || fixJob.status;
+
+    if (fixJob.status === 'complete') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
+          <span style={{ fontSize: '11px', color: theme.success, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Check size={12} />
+            Fix applied
+            {fixJob.commitSha && (
+              <code style={{ fontSize: '10px', color: theme.textMuted, marginLeft: '4px' }}>
+                {fixJob.commitSha.slice(0, 8)}
+              </code>
+            )}
+          </span>
+          <button
+            style={{ ...btnBase, fontSize: '10px', padding: '1px 6px', alignSelf: 'flex-start' }}
+            onClick={() => useReviewStore.getState().clearFixJob(fixKey)}
+          >
+            Dismiss
+          </button>
+        </div>
+      );
+    }
+
+    if (fixJob.status === 'failed') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
+          <span style={{ fontSize: '11px', color: theme.isDark ? '#fca5a5' : '#991b1b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <X size={12} />
+            {fixJob.error || 'Fix failed'}
+          </span>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <button style={{ ...btnBase, fontSize: '10px', padding: '1px 6px' }} onClick={handleFix}>
+              Retry
+            </button>
+            <button
+              style={{ ...btnBase, fontSize: '10px', padding: '1px 6px' }}
+              onClick={() => useReviewStore.getState().clearFixJob(fixKey)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Active fix in progress
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+        <Loader2 size={12} style={{ animation: 'otto-spin 1s linear infinite', color: theme.brandText }} />
+        <span style={{ fontSize: '11px', color: theme.textSecondary }}>{label}</span>
+      </div>
+    );
+  }
+
+  if (!canFix) return null;
+
+  return (
+    <div style={{ marginTop: '6px' }}>
+      <button
+        style={{
+          ...btnBase,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '3px',
+          background: theme.isDark ? '#1e1b4b' : '#eef2ff',
+          color: theme.isDark ? '#a5b4fc' : '#4338ca',
+          borderColor: theme.isDark ? '#312e81' : '#a5b4fc',
+        }}
+        onClick={handleFix}
+        title="Auto-fix: clone, apply, test, and push this change in a sandbox"
+      >
+        <Wrench size={11} />
+        Fix
+      </button>
+    </div>
+  );
 }
 
 function ReplyDraft({ draft, theme }: { draft: string; theme: OttoTheme }) {
