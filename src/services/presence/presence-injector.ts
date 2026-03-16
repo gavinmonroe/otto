@@ -24,6 +24,7 @@ import { usePresenceStore, getViewersForFile } from '@/services/presence/presenc
 import type { ViewerPresence } from '@/services/presence/presence-store';
 import { getHealthLevel } from '@/services/review/health-monitor';
 import { guardedMutation } from '@/lib/dom-guard';
+import { DEFAULT_HUE, hslToHex } from '@/lib/palette';
 
 const DEBUG = false;
 function dbg(msg: string, ...args: any[]) {
@@ -91,8 +92,9 @@ function tooltipFor(viewer: ViewerPresence): string {
   return viewer.userId;
 }
 
-function createAvatarDot(viewer: ViewerPresence, isDark: boolean): HTMLElement {
+function createAvatarDot(viewer: ViewerPresence, isDark: boolean, brandHue: number = DEFAULT_HUE): HTMLElement {
   const color = colorForUser(viewer.userId);
+  const borderColor = isDark ? hslToHex(brandHue, 20, 17) : '#ffffff';
 
   if (viewer.avatarUrl) {
     // Real GitLab avatar
@@ -106,25 +108,26 @@ function createAvatarDot(viewer: ViewerPresence, isDark: boolean): HTMLElement {
       border-radius: 50%;
       flex-shrink: 0;
       margin-left: 2px;
-      border: 2px solid ${isDark ? '#1f2937' : '#ffffff'};
+      border: 2px solid ${borderColor};
       box-shadow: 0 0 0 1px ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'};
       object-fit: cover;
     `;
     // Fallback to initials if image fails to load
     img.onerror = () => {
-      const fallback = createInitialsDot(viewer, isDark);
+      const fallback = createInitialsDot(viewer, isDark, brandHue);
       img.replaceWith(fallback);
     };
     return img;
   }
 
-  return createInitialsDot(viewer, isDark);
+  return createInitialsDot(viewer, isDark, brandHue);
 }
 
-function createInitialsDot(viewer: ViewerPresence, isDark: boolean): HTMLElement {
+function createInitialsDot(viewer: ViewerPresence, isDark: boolean, brandHue: number = DEFAULT_HUE): HTMLElement {
   const dot = document.createElement('span');
   const color = colorForUser(viewer.userId);
-  const textColor = isDark ? '#111827' : '#ffffff';
+  const textColor = isDark ? hslToHex(brandHue, 30, 11) : '#ffffff';
+  const borderColor = isDark ? hslToHex(brandHue, 20, 17) : '#ffffff';
 
   dot.textContent = initialsFor(viewer.displayName, viewer.userId);
   dot.title = tooltipFor(viewer);
@@ -144,14 +147,14 @@ function createInitialsDot(viewer: ViewerPresence, isDark: boolean): HTMLElement
     margin-left: 2px;
     line-height: 1;
     letter-spacing: -0.5px;
-    border: 2px solid ${isDark ? '#1f2937' : '#ffffff'};
+    border: 2px solid ${borderColor};
     box-shadow: 0 0 0 1px ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'};
   `;
 
   return dot;
 }
 
-function createPresenceContainer(viewers: ViewerPresence[], filePath: string, isDark: boolean): HTMLElement {
+function createPresenceContainer(viewers: ViewerPresence[], filePath: string, isDark: boolean, brandHue: number = DEFAULT_HUE): HTMLElement {
   const container = document.createElement('span');
   container.setAttribute(INJECTED_ATTR, filePath);
   container.style.cssText = `
@@ -163,7 +166,7 @@ function createPresenceContainer(viewers: ViewerPresence[], filePath: string, is
 
   // Stack avatars with negative margin for overlap (like GitHub)
   for (let i = 0; i < viewers.length; i++) {
-    const dot = createAvatarDot(viewers[i], isDark);
+    const dot = createAvatarDot(viewers[i], isDark, brandHue);
     if (i > 0) {
       dot.style.marginLeft = '-6px';
     }
@@ -178,7 +181,7 @@ function createPresenceContainer(viewers: ViewerPresence[], filePath: string, is
 // showing where another viewer is currently looking.
 // ---------------------------------------------------------------------------
 
-function injectGutterBars(isDark: boolean): void {
+function injectGutterBars(isDark: boolean, brandHue: number = DEFAULT_HUE): void {
   const files = document.querySelectorAll('.diff-file.file-holder');
 
   for (const file of files) {
@@ -245,7 +248,7 @@ function injectGutterBars(isDark: boolean): void {
         // Pin a mini avatar bubble to the first row of this viewer's range
         if (isFirstRow) {
           isFirstRow = false;
-          const bubble = createGutterBubble(viewer, color, isDark);
+          const bubble = createGutterBubble(viewer, color, isDark, brandHue);
           rowEl.appendChild(bubble);
           bars.push(bubble);
         }
@@ -262,7 +265,7 @@ function injectGutterBars(isDark: boolean): void {
  * Create a small avatar bubble pinned to the left gutter at the start
  * of a viewer's line range. Shows who is looking at this section.
  */
-function createGutterBubble(viewer: ViewerPresence, color: string, isDark: boolean): HTMLElement {
+function createGutterBubble(viewer: ViewerPresence, color: string, isDark: boolean, brandHue: number = DEFAULT_HUE): HTMLElement {
   const bubble = document.createElement('span');
   bubble.setAttribute(GUTTER_ATTR, `${viewer.userId}-bubble`);
   bubble.title = `${tooltipFor(viewer)} is viewing here`;
@@ -301,12 +304,12 @@ function createGutterBubble(viewer: ViewerPresence, color: string, isDark: boole
       flex-shrink: 0;
     `;
     img.onerror = () => {
-      const fallback = createMiniBubbleInitials(viewer, color, isDark);
+      const fallback = createMiniBubbleInitials(viewer, color, isDark, brandHue);
       img.replaceWith(fallback);
     };
     bubble.appendChild(img);
   } else {
-    bubble.appendChild(createMiniBubbleInitials(viewer, color, isDark));
+    bubble.appendChild(createMiniBubbleInitials(viewer, color, isDark, brandHue));
   }
 
   // Name label
@@ -328,7 +331,7 @@ function createGutterBubble(viewer: ViewerPresence, color: string, isDark: boole
   return bubble;
 }
 
-function createMiniBubbleInitials(viewer: ViewerPresence, color: string, isDark: boolean): HTMLElement {
+function createMiniBubbleInitials(viewer: ViewerPresence, color: string, isDark: boolean, brandHue: number = DEFAULT_HUE): HTMLElement {
   const dot = document.createElement('span');
   dot.textContent = initialsFor(viewer.displayName, viewer.userId);
   dot.style.cssText = `
@@ -339,7 +342,7 @@ function createMiniBubbleInitials(viewer: ViewerPresence, color: string, isDark:
     height: 16px;
     border-radius: 50%;
     background: ${color};
-    color: ${isDark ? '#111827' : '#ffffff'};
+    color: ${isDark ? hslToHex(brandHue, 30, 11) : '#ffffff'};
     font-size: 7px;
     font-weight: 600;
     line-height: 1;
@@ -389,7 +392,7 @@ function findDiffFileHeaders(): Array<{ el: Element; filePath: string }> {
   return results;
 }
 
-function injectPresence(isDark: boolean): void {
+function injectPresence(isDark: boolean, brandHue: number = DEFAULT_HUE): void {
   guardedMutation(() => {
     const headers = findDiffFileHeaders();
 
@@ -408,7 +411,7 @@ function injectPresence(isDark: boolean): void {
       }
 
       // Build the new container
-      const newContainer = createPresenceContainer(viewers, filePath, isDark);
+      const newContainer = createPresenceContainer(viewers, filePath, isDark, brandHue);
 
       if (existing?.isConnected) {
         // Replace existing
@@ -421,7 +424,7 @@ function injectPresence(isDark: boolean): void {
     }
 
     // Gutter bars for line-range visualization
-    injectGutterBars(isDark);
+    injectGutterBars(isDark, brandHue);
   });
 }
 
@@ -450,7 +453,7 @@ function pruneDetached(): void {
  * Start injecting presence avatars into diff file headers.
  * Returns a cleanup function.
  */
-export function startPresenceInjection(isDarkMode: boolean, signal?: AbortSignal): () => void {
+export function startPresenceInjection(isDarkMode: boolean, signal?: AbortSignal, brandHue: number = DEFAULT_HUE): () => void {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   function update() {
@@ -458,7 +461,7 @@ export function startPresenceInjection(isDarkMode: boolean, signal?: AbortSignal
     if (health === 'degraded' || health === 'critical') return;
 
     pruneDetached();
-    injectPresence(isDarkMode);
+    injectPresence(isDarkMode, brandHue);
   }
 
   function debouncedUpdate() {

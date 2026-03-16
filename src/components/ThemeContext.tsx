@@ -11,9 +11,15 @@
 //
 // The content script detects GitLab's dark mode once and wraps the
 // component tree in <ThemeProvider>.
+//
+// The theme is now generated dynamically from a brand hue (0-360) via
+// the palette generator. The default hue (207) produces the original
+// midnight blue palette, so existing behavior is preserved when no
+// hue is specified.
 // ---------------------------------------------------------------------------
 
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { generateTheme, DEFAULT_HUE } from '@/lib/palette';
 
 export type OttoTheme = {
   isDark: boolean;
@@ -33,6 +39,7 @@ export type OttoTheme = {
   brand: string;
   brandHover: string;
   brandText: string;
+  logoColor: string;
   // Semantic
   error: string;
   errorBg: string;
@@ -51,71 +58,25 @@ export type OttoTheme = {
   btnSecondaryBorder: string;
 };
 
-const LIGHT_THEME: OttoTheme = {
-  isDark: false,
-  bg: '#ffffff',
-  bgSubtle: '#f9fafb',
-  bgMuted: '#f3f4f6',
-  bgInset: '#f8fafc',
-  text: '#1f2937',
-  textSecondary: '#6b7280',
-  textMuted: '#9ca3af',
-  border: '#e5e7eb',
-  borderSubtle: '#f3f4f6',
-  brand: '#0c93e7',
-  brandHover: '#0074c5',
-  brandText: '#0074c5',
-  error: '#991b1b',
-  errorBg: '#fef2f2',
-  errorBorder: '#fecaca',
-  success: '#16a34a',
-  successBg: '#f0fdf4',
-  warning: '#d97706',
-  warningBg: '#fffbeb',
-  info: '#2563eb',
-  infoBg: '#eff6ff',
-  btnPrimaryBg: '#0c93e7',
-  btnPrimaryText: '#ffffff',
-  btnSecondaryBg: '#f3f4f6',
-  btnSecondaryText: '#374151',
-  btnSecondaryBorder: '#e5e7eb',
+// Static defaults for the context initial value and non-React consumers.
+// Generated once at module load — identical to the old hardcoded LIGHT_THEME.
+const DEFAULT_THEME = generateTheme(DEFAULT_HUE, false);
+
+const ThemeContext = createContext<OttoTheme>(DEFAULT_THEME);
+
+type ThemeProviderProps = {
+  isDark: boolean;
+  /** Brand hue (0-360). Defaults to 207 (midnight blue). */
+  hue?: number;
+  children: ReactNode;
 };
 
-const DARK_THEME: OttoTheme = {
-  isDark: true,
-  bg: '#1f2937',
-  bgSubtle: '#111827',
-  bgMuted: '#374151',
-  bgInset: '#1e293b',
-  text: '#e5e7eb',
-  textSecondary: '#9ca3af',
-  textMuted: '#6b7280',
-  border: '#374151',
-  borderSubtle: '#1f2937',
-  brand: '#40C4F5',
-  brandHover: '#0c93e7',
-  brandText: '#93c5fd',
-  error: '#fca5a5',
-  errorBg: '#450a0a',
-  errorBorder: '#7f1d1d',
-  success: '#4ade80',
-  successBg: '#064e3b',
-  warning: '#fbbf24',
-  warningBg: '#451a03',
-  info: '#93c5fd',
-  infoBg: '#1e3a5f',
-  btnPrimaryBg: '#0c93e7',
-  btnPrimaryText: '#ffffff',
-  btnSecondaryBg: '#374151',
-  btnSecondaryText: '#e5e7eb',
-  btnSecondaryBorder: '#4b5563',
-};
+export function ThemeProvider({ isDark, hue, children }: ThemeProviderProps) {
+  const resolvedHue = hue ?? DEFAULT_HUE;
+  const theme = useMemo(() => generateTheme(resolvedHue, isDark), [resolvedHue, isDark]);
 
-const ThemeContext = createContext<OttoTheme>(LIGHT_THEME);
-
-export function ThemeProvider({ isDark, children }: { isDark: boolean; children: ReactNode }) {
   return (
-    <ThemeContext.Provider value={isDark ? DARK_THEME : LIGHT_THEME}>
+    <ThemeContext.Provider value={theme}>
       {children}
     </ThemeContext.Provider>
   );

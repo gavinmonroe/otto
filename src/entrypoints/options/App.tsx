@@ -18,8 +18,10 @@ import { JiraConnectionForm } from '@/components/settings/JiraConnectionForm';
 import { ReviewerPreferencesForm } from '@/components/settings/ReviewerPreferencesForm';
 import { FeatureTogglesForm } from '@/components/settings/FeatureTogglesForm';
 import { BottoConnectionForm } from '@/components/settings/BottoConnectionForm';
+import { BrandColorForm } from '@/components/settings/BrandColorForm';
 import { OttoLogo } from '@/components/OttoLogo';
 import { exportConfig, importConfig } from '@/lib/settings-io';
+import { DEFAULT_HUE, generateOptionsTheme, getLogoColor } from '@/lib/palette';
 
 function useIsDark(themePref: 'light' | 'dark' | 'auto'): boolean {
   const [systemDark, setSystemDark] = useState(
@@ -41,7 +43,9 @@ function useIsDark(themePref: 'light' | 'dark' | 'auto'): boolean {
 export function App() {
   const { settings, loading, error, updateSettings, updateAiConfig, updatePreferences } = useSettings();
   const isDark = useIsDark(settings.preferences.theme);
-  const t = useMemo(() => getTheme(isDark), [isDark]);
+  const brandHue = settings.preferences.brandHue ?? DEFAULT_HUE;
+  const t = useMemo(() => getTheme(isDark, brandHue), [isDark, brandHue]);
+  const logoColor = useMemo(() => getLogoColor(brandHue), [brandHue]);
 
   useEffect(() => {
     document.body.style.background = t.bg;
@@ -63,7 +67,7 @@ export function App() {
   return (
     <div style={{ ...containerStyle, color: t.text }}>
       <div style={{ ...headerStyle, borderColor: t.border }}>
-        <OttoLogo size={32} />
+        <OttoLogo size={32} brandColor={logoColor} />
         <div>
           <h1 style={{ fontSize: '20px', fontWeight: 600, margin: 0, color: t.text }}>Otto Settings</h1>
           <p style={{ fontSize: '13px', color: t.textMuted, margin: 0 }}>
@@ -97,6 +101,9 @@ export function App() {
 
         {/* Import / Export */}
         <ConfigPortSection settings={settings} onUpdate={updateSettings} theme={t} />
+
+        {/* Brand Color */}
+        <BrandColorForm settings={settings} onUpdate={updatePreferences} isDark={isDark} optionsTheme={t} />
 
         {/* Preferences */}
         <div style={{ ...sectionStyle, background: t.cardBg, borderColor: t.border }}>
@@ -282,9 +289,11 @@ function configButtonStyle(t: OptionsTheme): React.CSSProperties {
   };
 }
 
-/** Quick check — the theme object doesn't carry an isDark flag, so infer from bg. */
+/** Quick check — the theme object doesn't carry an isDark flag, so infer from lightness. */
 function isDarkTheme(t: OptionsTheme): boolean {
-  return t.bg === '#111827';
+  // Dark themes have dark bg — check if it starts with a low-lightness hex
+  // The generateOptionsTheme dark bg is always a dark color.
+  return t.bg !== '#ffffff';
 }
 
 // ---------------------------------------------------------------------------
@@ -304,33 +313,8 @@ type OptionsTheme = {
   errorBorder: string;
 };
 
-function getTheme(isDark: boolean): OptionsTheme {
-  if (isDark) {
-    return {
-      bg: '#111827',
-      text: '#f3f4f6',
-      textMuted: '#9ca3af',
-      border: '#374151',
-      cardBg: '#1f2937',
-      subtleBg: '#1a2332',
-      inputBg: '#374151',
-      error: '#fca5a5',
-      errorBg: '#450a0a',
-      errorBorder: '#7f1d1d',
-    };
-  }
-  return {
-    bg: '#ffffff',
-    text: '#111827',
-    textMuted: '#6b7280',
-    border: '#e5e7eb',
-    cardBg: '#ffffff',
-    subtleBg: '#f9fafb',
-    inputBg: '#ffffff',
-    error: '#991b1b',
-    errorBg: '#fef2f2',
-    errorBorder: '#fecaca',
-  };
+function getTheme(isDark: boolean, brandHue: number = DEFAULT_HUE): OptionsTheme {
+  return generateOptionsTheme(brandHue, isDark);
 }
 
 // ---------------------------------------------------------------------------

@@ -7,13 +7,18 @@
 // - Current page detection (are we on a GitLab MR?)
 // ---------------------------------------------------------------------------
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSettings } from '@/hooks/use-settings';
 import { OttoLogo } from '@/components/OttoLogo';
+import { DEFAULT_HUE, getBrandColor, getLogoColor } from '@/lib/palette';
 
 export function App() {
   const { settings, loading } = useSettings();
   const [currentTab, setCurrentTab] = useState<{ url: string; title: string } | null>(null);
+
+  const brandHue = settings.preferences.brandHue ?? DEFAULT_HUE;
+  const brandColor = useMemo(() => getBrandColor(brandHue, false), [brandHue]);
+  const logoColor = useMemo(() => getLogoColor(brandHue), [brandHue]);
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -36,7 +41,7 @@ export function App() {
     <div style={containerStyle}>
       {/* Header */}
       <div style={headerStyle}>
-        <OttoLogo size={24} />
+        <OttoLogo size={24} brandColor={logoColor} />
         <span style={{ fontWeight: 600, fontSize: '15px' }}>Otto</span>
       </div>
 
@@ -92,7 +97,10 @@ export function App() {
 
       {/* Footer */}
       <div style={footerStyle}>
-        <button onClick={handleOpenOptions} style={settingsButtonStyle}>
+        <button onClick={handleOpenOptions} style={{
+          ...settingsButtonStyle,
+          background: brandColor,
+        }}>
           Settings
         </button>
       </div>

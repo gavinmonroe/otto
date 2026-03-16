@@ -60,6 +60,8 @@ export type Preferences = {
   theme: 'light' | 'dark' | 'auto';
   reviewMode: ReviewMode;
   enabledFeatures: Record<ToggleableFeature, boolean>;
+  /** Brand hue (0-360). Controls the entire Otto color palette. Default: 207 (midnight blue). */
+  brandHue?: number;
 };
 
 export type OttoSettings = {

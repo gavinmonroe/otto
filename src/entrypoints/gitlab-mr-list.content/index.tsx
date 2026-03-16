@@ -30,6 +30,7 @@ import type {
 import type { ReviewTask } from '@/services/review/review-types';
 import { getBottoClient, disconnectBotto } from '@/lib/botto-client';
 import { registerBottoTransport } from '@/lib/messaging';
+import { DEFAULT_HUE, getBrandColor, getLogoColor } from '@/lib/palette';
 export default defineContentScript({
   matches: ['*://*/*'],
   runAt: 'document_idle',
@@ -90,10 +91,11 @@ export default defineContentScript({
 
     // If queue feature is enabled, run the full command center.
     // Otherwise, fall back to basic preview strips only.
+    const brandHueForMount = settings.preferences.brandHue ?? DEFAULT_HUE;
     if (settings.preferences.enabledFeatures?.mrReviewQueue !== false) {
-      await initMrListCommandCenter(ctx, listInfo);
+      await initMrListCommandCenter(ctx, listInfo, brandHueForMount);
     } else {
-      await initBasicPreviews(ctx, listInfo);
+      await initBasicPreviews(ctx, listInfo, brandHueForMount);
     }
   },
 });
@@ -151,16 +153,18 @@ type MountContext = {
   hostUrl: string;
   isDark: boolean;
   brandColor: string;
+  brandHue: number;
 };
 async function initMrListCommandCenter(
   ctx: typeof ContentScriptContext.prototype,
   listInfo: MrListInfo,
+  brandHue: number = DEFAULT_HUE,
 ): Promise<void> {
   const isDark = detectDarkMode();
 
   // Show a loading indicator immediately so the user knows Otto is working.
   // This appears before any async work (host resolution, preview fetching).
-  const loadingIndicator = mountLoadingIndicator(isDark);
+  const loadingIndicator = mountLoadingIndicator(isDark, brandHue);
 
   const hostResult = await sendMessage({
     type: 'RESOLVE_GITLAB_HOST',
@@ -183,7 +187,8 @@ async function initMrListCommandCenter(
     projectPath: listInfo.projectPath,
     hostUrl: listInfo.hostUrl,
     isDark,
-    brandColor: isDark ? '#40C4F5' : '#0c93e7',
+    brandColor: getBrandColor(brandHue, isDark),
+    brandHue,
   };
   loadingIndicator.update('Waiting for MR list...');
 
@@ -417,9 +422,10 @@ function listenForSettingsToggle(
 async function initBasicPreviews(
   ctx: typeof ContentScriptContext.prototype,
   listInfo: MrListInfo,
+  brandHue: number = DEFAULT_HUE,
 ): Promise<void> {
   const isDark = detectDarkMode();
-  const loadingIndicator = mountLoadingIndicator(isDark);
+  const loadingIndicator = mountLoadingIndicator(isDark, brandHue);
 
   const hostResult = await sendMessage({
     type: 'RESOLVE_GITLAB_HOST',
@@ -441,7 +447,8 @@ async function initBasicPreviews(
     projectPath: listInfo.projectPath,
     hostUrl: listInfo.hostUrl,
     isDark,
-    brandColor: isDark ? '#40C4F5' : '#0c93e7',
+    brandColor: getBrandColor(brandHue, isDark),
+    brandHue,
   };
 
   loadingIndicator.update('Waiting for MR list...');
@@ -866,6 +873,7 @@ function renderGroupHeaders(
     root.render(
       createElement(ThemeProvider, {
         isDark: mountContext.isDark,
+        hue: mountContext.brandHue,
         children: createElement(TicketGroupHeader, {
           group,
           onToggle: (ticketKey: string) => {
@@ -933,6 +941,7 @@ function mountToolbar(
     root.render(
       createElement(ThemeProvider, {
         isDark: mountContext.isDark,
+        hue: mountContext.brandHue,
         children: createElement(MrListToolbar, {
           sortKey: currentSortKey,
           onSortChange: (key: QueueSortKey) => {
@@ -1309,8 +1318,8 @@ type LoadingIndicatorHandle = {
   remove: () => void;
 };
 
-function mountLoadingIndicator(isDark: boolean): LoadingIndicatorHandle {
-  const brandColor = '#40C4F5';
+function mountLoadingIndicator(isDark: boolean, brandHue: number = DEFAULT_HUE): LoadingIndicatorHandle {
+  const brandColor = getLogoColor(brandHue);
   const bg = isDark ? '#161b22' : '#f6f8fa';
   const border = isDark ? '#30363d' : '#d0d7de';
   const text = isDark ? '#c9d1d9' : '#24292f';

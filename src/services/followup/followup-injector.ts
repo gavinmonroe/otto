@@ -23,6 +23,7 @@ import { FollowUpPanel } from '@/components/followup/FollowUpPanel';
 import { useReviewStore } from '@/services/review/review-store';
 import { getHealthLevel } from '@/services/review/health-monitor';
 import { isOttoMutating, guardedMutation, isInjectionCooldown } from '@/lib/dom-guard';
+import { DEFAULT_HUE, getInjectorColors } from '@/lib/palette';
 
 const DEBUG = true;
 function dbg(msg: string, ...args: any[]) {
@@ -47,9 +48,9 @@ const visiblePanels = new Set<string>();
  *
  * Returns a cleanup function that removes all injected UI and stops observing.
  */
-export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: AbortSignal): () => void {
+export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: AbortSignal, brandHue: number = DEFAULT_HUE): () => void {
   // Initial scan — process notes already on the page
-  scanAndInjectButtons(isDarkMode);
+  scanAndInjectButtons(isDarkMode, brandHue);
 
   // Watch for new notes (lazy-loaded discussions, tab switches)
   // Only schedules work when mutations contain note-like elements —
@@ -81,12 +82,12 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
     if (!hasRelevantNodes) return;
 
     dbg(`MutationObserver: found relevant note nodes, scheduling scan`);
-    scanTimer = setTimeout(() => {
-      scanTimer = null;
-      pruneDetachedButtons();
-      pruneDetachedPanels();
-      scanAndInjectButtons(isDarkMode);
-    }, 200);
+      scanTimer = setTimeout(() => {
+        scanTimer = null;
+        pruneDetachedButtons();
+        pruneDetachedPanels();
+        scanAndInjectButtons(isDarkMode, brandHue);
+      }, 200);
   });
 
   observer.observe(document.body, {
@@ -108,7 +109,7 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
     const buttonsBefore = mountedButtons.size;
     pruneDetachedButtons();
     pruneDetachedPanels();
-    scanAndInjectButtons(isDarkMode);
+    scanAndInjectButtons(isDarkMode, brandHue);
     const buttonsAfter = mountedButtons.size;
     dbg(`rescan tick: buttons ${buttonsBefore}→${buttonsAfter}, idle=${consecutiveIdleScans + (buttonsAfter === buttonsBefore ? 1 : 0)}/3`);
 
@@ -128,7 +129,7 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
       setTimeout(() => {
         pruneDetachedButtons();
         pruneDetachedPanels();
-        scanAndInjectButtons(isDarkMode);
+        scanAndInjectButtons(isDarkMode, brandHue);
       }, 500);
     }
   };
@@ -145,7 +146,7 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
     for (const [commentId, panel] of mountedPanels) {
       const analysis = state.followUps[commentId];
       if (analysis && visiblePanels.has(commentId)) {
-        renderPanel(panel, analysis, commentId, isDarkMode);
+        renderPanel(panel, analysis, commentId, isDarkMode, brandHue);
       }
     }
   });
@@ -207,7 +208,7 @@ function pruneDetachedPanels(): void {
 // DOM scanning and button injection
 // ---------------------------------------------------------------------------
 
-function scanAndInjectButtons(isDarkMode: boolean): void {
+function scanAndInjectButtons(isDarkMode: boolean, brandHue: number = DEFAULT_HUE): void {
   // Find all note elements that have action bars.
   // GitLab uses different DOM structures across versions:
   // - Older: .note with .note-actions
@@ -245,7 +246,7 @@ function scanAndInjectButtons(isDarkMode: boolean): void {
     // Mark as processed
     htmlNote.setAttribute(BUTTON_ATTR, noteId);
 
-    injectButton(htmlNote, actionBar as HTMLElement, noteId, isDarkMode);
+    injectButton(htmlNote, actionBar as HTMLElement, noteId, isDarkMode, brandHue);
   }
 }
 
@@ -263,6 +264,7 @@ function injectButton(
   actionBar: HTMLElement,
   noteId: string,
   isDarkMode: boolean,
+  brandHue: number = DEFAULT_HUE,
 ): void {
   guardedMutation(() => {
     // Create container for the button
@@ -278,7 +280,7 @@ function injectButton(
     const shadow = container.attachShadow({ mode: 'open' });
 
     const styleEl = document.createElement('style');
-    styleEl.textContent = getButtonShadowStyles(isDarkMode);
+    styleEl.textContent = getButtonShadowStyles(isDarkMode, brandHue);
     shadow.appendChild(styleEl);
 
     const mountPoint = document.createElement('div');
@@ -287,12 +289,13 @@ function injectButton(
     const root = createRoot(mountPoint);
 
     const handleTogglePanel = (commentId: string) => {
-      togglePanel(noteElement, commentId, isDarkMode);
+      togglePanel(noteElement, commentId, isDarkMode, brandHue);
     };
 
     root.render(
       createElement(ThemeProvider, {
         isDark: isDarkMode,
+        hue: brandHue,
         children: createElement(OttoErrorBoundary, { name: 'FollowUpButton' },
           createElement(FollowUpButton, {
             noteElement,
@@ -310,7 +313,7 @@ function injectButton(
 // Panel management
 // ---------------------------------------------------------------------------
 
-function togglePanel(noteElement: HTMLElement, commentId: string, isDarkMode: boolean): void {
+function togglePanel(noteElement: HTMLElement, commentId: string, isDarkMode: boolean, brandHue: number = DEFAULT_HUE): void {
   if (visiblePanels.has(commentId)) {
     // Hide the panel
     visiblePanels.delete(commentId);
@@ -330,7 +333,7 @@ function togglePanel(noteElement: HTMLElement, commentId: string, isDarkMode: bo
     // Re-render with latest state
     const analysis = useReviewStore.getState().followUps[commentId];
     if (analysis) {
-      renderPanel(existing, analysis, commentId, isDarkMode);
+      renderPanel(existing, analysis, commentId, isDarkMode, brandHue);
     }
     return;
   }
@@ -362,7 +365,7 @@ function togglePanel(noteElement: HTMLElement, commentId: string, isDarkMode: bo
 
   const analysis = useReviewStore.getState().followUps[commentId];
   if (analysis) {
-    renderPanel(panel, analysis, commentId, isDarkMode);
+    renderPanel(panel, analysis, commentId, isDarkMode, brandHue);
   }
 }
 
@@ -371,6 +374,7 @@ function renderPanel(
   analysis: import('@/types/followup').FollowUpAnalysis,
   commentId: string,
   isDarkMode: boolean,
+  brandHue: number = DEFAULT_HUE,
 ): void {
   const handleDismiss = () => {
     visiblePanels.delete(commentId);
@@ -380,6 +384,7 @@ function renderPanel(
   panel.root.render(
     createElement(ThemeProvider, {
       isDark: isDarkMode,
+      hue: brandHue,
       children: createElement(OttoErrorBoundary, { name: 'FollowUpPanel' },
         createElement(FollowUpPanel, {
           analysis,
@@ -394,9 +399,8 @@ function renderPanel(
 // Shadow DOM styles
 // ---------------------------------------------------------------------------
 
-function getButtonShadowStyles(isDarkMode: boolean): string {
-  const brandColor = isDarkMode ? '#40C4F5' : '#0c93e7';
-  const borderColor = isDarkMode ? '#374151' : '#e5e7eb';
+function getButtonShadowStyles(isDarkMode: boolean, brandHue: number = DEFAULT_HUE): string {
+  const colors = getInjectorColors(brandHue, isDarkMode);
 
   return `
     :host {
@@ -411,8 +415,8 @@ function getButtonShadowStyles(isDarkMode: boolean): string {
       font-family: inherit;
     }
     button:hover:not(:disabled) {
-      border-color: ${brandColor} !important;
-      background: ${isDarkMode ? 'rgba(64, 196, 245, 0.1)' : 'rgba(12, 147, 231, 0.08)'} !important;
+      border-color: ${colors.brand} !important;
+      background: ${colors.brandTintBg} !important;
     }
   `;
 }

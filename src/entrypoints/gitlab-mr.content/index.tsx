@@ -45,6 +45,7 @@ import { registerBottoTransport } from '@/lib/messaging';
 import { usePresenceStore } from '@/services/presence/presence-store';
 import { startViewportTracker } from '@/services/presence/viewport-tracker';
 import { startPresenceInjection } from '@/services/presence/presence-injector';
+import { DEFAULT_HUE, generateCssVariables, getInjectorColors, getLogoColor, hslToHex } from '@/lib/palette';
 
 // Presence cleanup functions — stored at module level so the SPA navigation
 // handler can tear them down. ctx.signal only fires on content script
@@ -84,6 +85,7 @@ export default defineContentScript({
     const settingsResult = await sendMessage({ type: 'GET_SETTINGS' });
     const settings: OttoSettings | null = settingsResult.ok ? settingsResult.data : null;
     const enabled = settings?.preferences.enabledFeatures;
+    const brandHue = settings?.preferences.brandHue ?? DEFAULT_HUE;
 
     // Initialize Botto client if configured — must happen before any review streams.
     // Store settings on globalThis so stream-dispatcher can access them synchronously.
@@ -255,16 +257,16 @@ export default defineContentScript({
     // Start follow-up button injection — comments exist on all tabs.
     // Only inject if the feature is enabled.
     if (enabled?.followUp !== false) {
-      startFollowUpButtonInjection(isDarkMode, ctx.signal);
+      startFollowUpButtonInjection(isDarkMode, ctx.signal, brandHue);
     }
 
     // Mount the chat UI — available on any MR tab, not just diffs.
     // Always mount the overlay (for health toast), but only include
     // chat components if the feature is enabled.
-    mountChatUI(ctx, isDarkMode, enabled?.chat !== false);
+    mountChatUI(ctx, isDarkMode, enabled?.chat !== false, brandHue);
 
     // The rest of the review features require the diffs tab.
-    initDiffsFeatures(ctx, urlInfo, isDarkMode, enabled);
+    initDiffsFeatures(ctx, urlInfo, isDarkMode, enabled, brandHue);
 
     ctx.addEventListener(window, 'wxt:locationchange', async (event) => {
       const newUrlInfo = parseMrUrl(event.newUrl.href);
@@ -312,6 +314,7 @@ async function initDiffsFeatures(
   urlInfo: { hostUrl: string; projectPath: string; mrIid: number },
   isDarkMode: boolean,
   enabled?: Record<string, boolean>,
+  brandHue: number = DEFAULT_HUE,
 ): Promise<void> {
   const diffsContainer = await waitForDiffsTab(ctx.signal);
   if (!diffsContainer) return;
@@ -330,11 +333,11 @@ async function initDiffsFeatures(
 
   // Overview panel is always mounted — it shows disabled states for
   // turned-off features and lets users click to run them ad-hoc.
-  await mountOverviewPanel(ctx, isDarkMode);
+  await mountOverviewPanel(ctx, isDarkMode, brandHue);
 
   observeDiffFiles((fileElement, filePath) => {
-    mountFileReviewCard(ctx, fileElement, filePath, isDarkMode);
-    mountFileReviewFooter(ctx, fileElement, filePath, isDarkMode);
+    mountFileReviewCard(ctx, fileElement, filePath, isDarkMode, brandHue);
+    mountFileReviewFooter(ctx, fileElement, filePath, isDarkMode, brandHue);
   }, ctx.signal);
 
   // Code review injectors — only start if codeReview is enabled
@@ -358,7 +361,7 @@ async function initDiffsFeatures(
   if (bottoClient?.isConnected()) {
     // Tear down any previous presence from a prior SPA navigation
     teardownPresence();
-    cleanupPresenceInjector = startPresenceInjection(isDarkMode, ctx.signal);
+    cleanupPresenceInjector = startPresenceInjection(isDarkMode, ctx.signal, brandHue);
     cleanupViewportTracker = startViewportTracker(bottoClient, ctx.signal);
   }
 
@@ -374,6 +377,7 @@ async function initDiffsFeatures(
 async function mountOverviewPanel(
   ctx: typeof ContentScriptContext.prototype,
   isDarkMode: boolean,
+  brandHue: number = DEFAULT_HUE,
 ): Promise<void> {
   const anchor = document.querySelector('.diff-files-holder');
   if (!anchor) return;
@@ -389,7 +393,7 @@ async function mountOverviewPanel(
       wrapper.setAttribute('data-otto-overview', 'true');
       container.append(wrapper);
       const root = createRoot(wrapper);
-      root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'Overview' }, createElement(MrOverviewPanel)) }));
+      root.render(createElement(ThemeProvider, { isDark: isDarkMode, hue: brandHue, children: createElement(OttoErrorBoundary, { name: 'Overview' }, createElement(MrOverviewPanel)) }));
       return root;
     },
     onRemove: (root) => root?.unmount(),
@@ -403,6 +407,7 @@ function mountFileReviewCard(
   fileElement: Element,
   filePath: string,
   isDarkMode: boolean,
+  brandHue: number = DEFAULT_HUE,
 ): void {
   const fileActions = fileElement.querySelector('.file-actions');
   if (!fileActions) return;
@@ -420,14 +425,14 @@ function mountFileReviewCard(
     const shadow = ottoContainer.attachShadow({ mode: 'open' });
 
     const styleEl = document.createElement('style');
-    styleEl.textContent = getButtonStyles(isDarkMode);
+    styleEl.textContent = getButtonStyles(isDarkMode, brandHue);
     shadow.appendChild(styleEl);
 
     const mountPoint = document.createElement('div');
     shadow.appendChild(mountPoint);
 
     const root = createRoot(mountPoint);
-    root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'FileReview' }, createElement(FileReviewCard, { filePath })) }));
+    root.render(createElement(ThemeProvider, { isDark: isDarkMode, hue: brandHue, children: createElement(OttoErrorBoundary, { name: 'FileReview' }, createElement(FileReviewCard, { filePath })) }));
 
     ctx.signal.addEventListener('abort', () => {
       root.unmount();
@@ -445,6 +450,7 @@ function mountFileReviewFooter(
   fileElement: Element,
   filePath: string,
   isDarkMode: boolean,
+  brandHue: number = DEFAULT_HUE,
 ): void {
   // Find the diff content area — footer goes after it
   const diffContent = fileElement.querySelector('.diff-content');
@@ -469,7 +475,7 @@ function mountFileReviewFooter(
     shadow.appendChild(mountPoint);
 
     const root = createRoot(mountPoint);
-    root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'FileFooter' }, createElement(FileReviewFooter, { filePath })) }));
+    root.render(createElement(ThemeProvider, { isDark: isDarkMode, hue: brandHue, children: createElement(OttoErrorBoundary, { name: 'FileFooter' }, createElement(FileReviewFooter, { filePath })) }));
 
     ctx.signal.addEventListener('abort', () => {
       root.unmount();
@@ -497,11 +503,12 @@ function detectDarkMode(): boolean {
   return false;
 }
 
-function getButtonStyles(isDarkMode: boolean): string {
-  const bg = isDarkMode ? '#1f2937' : '#f0f7ff';
-  const bgHover = isDarkMode ? '#374151' : '#e0effe';
-  const text = isDarkMode ? '#93c5fd' : '#0074c5';
-  const border = isDarkMode ? '#374151' : '#bae0fd';
+function getButtonStyles(isDarkMode: boolean, brandHue: number = DEFAULT_HUE): string {
+  const colors = getInjectorColors(brandHue, isDarkMode);
+  const bg = isDarkMode ? colors.surfaceDark : hslToHex(brandHue, 100, 97);
+  const bgHover = isDarkMode ? colors.brandBorder : hslToHex(brandHue, 97, 94);
+  const text = isDarkMode ? hslToHex(brandHue, 95, 82) : hslToHex(brandHue, 100, 39);
+  const border = isDarkMode ? colors.brandBorder : hslToHex(brandHue, 96, 86);
 
   return `
     :host { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
@@ -518,7 +525,7 @@ function getButtonStyles(isDarkMode: boolean): string {
     .otto-spinner { width: 14px; height: 14px; border: 2px solid ${border}; border-top-color: ${text}; border-radius: 50%; animation: otto-spin 0.6s linear infinite; display: inline-block; }
     @keyframes otto-spin { to { transform: rotate(360deg); } }
     .otto-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 600; }
-    .otto-badge-count { background: ${text}; color: ${isDarkMode ? '#111827' : '#ffffff'}; }
+    .otto-badge-count { background: ${text}; color: ${isDarkMode ? hslToHex(brandHue, 30, 11) : '#ffffff'}; }
   `;
 }
 
@@ -543,6 +550,7 @@ async function mountChatUI(
   ctx: typeof ContentScriptContext.prototype,
   isDarkMode: boolean,
   chatEnabled: boolean,
+  brandHue: number = DEFAULT_HUE,
 ): Promise<void> {
   // Mount into a fixed-position shadow DOM container on the body
   const ui = await createShadowRootUi(ctx, {
@@ -562,6 +570,7 @@ async function mountChatUI(
       root.render(
         createElement(ThemeProvider, {
           isDark: isDarkMode,
+          hue: brandHue,
           children: createElement('div', null,
             chatEnabled && createElement(OttoErrorBoundary, { name: 'Chat' },
               createElement(ChatPill),

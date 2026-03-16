@@ -2,20 +2,36 @@
 // OttoLogo — the official Otto logo as a React component.
 //
 // Uses the real Otto SVG with `currentColor` for the lightning bolt paths
-// so they adapt to light/dark mode automatically. The blue (#40C4F5) paths
-// are always the brand color.
+// so they adapt to light/dark mode automatically. The brand-colored paths
+// use the theme's logoColor by default (via ThemeContext), or an explicit
+// `brandColor` prop if provided.
 //
 // Props:
 // - size: pixel dimension (square), defaults to 24
 // - className: optional CSS class
+// - brandColor: optional override — if omitted, reads from ThemeContext
 // ---------------------------------------------------------------------------
+
+import { useContext } from 'react';
+import { useTheme } from '@/components/ThemeContext';
 
 type OttoLogoProps = {
   size?: number;
   className?: string;
+  brandColor?: string;
 };
 
-export function OttoLogo({ size = 24, className }: OttoLogoProps) {
+export function OttoLogo({ size = 24, className, brandColor }: OttoLogoProps) {
+  // Read from theme context if no explicit brandColor was passed.
+  // Falls back to #40C4F5 if used outside a ThemeProvider (e.g., loading states).
+  let fill: string;
+  try {
+    const theme = useTheme();
+    fill = brandColor ?? theme.logoColor ?? '#40C4F5';
+  } catch {
+    fill = brandColor ?? '#40C4F5';
+  }
+
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -28,11 +44,11 @@ export function OttoLogo({ size = 24, className }: OttoLogoProps) {
     >
       <path
         d="m114.4 8.5h-3.61c-33.58 0-60.65 17.18-70.29 46.1-0.67 2.14 0.48 3.01 2.15 3.01h9.58c2.04 0 3.4-1.12 4.28-3.01 9.8-20.64 27.68-30.64 54.28-30.64h3.44c34.71 0 59.65 26.15 59.65 59.01 0 18.7-8.75 32.29-18.67 44.21-9.23 11.1-18.46 20.13-18.46 34.65v26.84c0 1.53 1.04 2.42 2.46 2.42h10.86c1.26 0 1.93-1.21 1.93-2.34v-28.05c0-8.79 7.84-15.71 15.85-25.28 11.09-13.11 21.64-27.95 21.64-52.29 0-39.99-30.64-74.63-75.09-74.63z"
-        fill="#40C4F5"
+        fill={fill}
       />
       <path
         d="m92.74 158.2h-30.02c-6.07 0-9.35-5.3-9.35-9.54v-12.78c0-1.33-1.08-2.04-2.21-2.04h-10.78c-1.34 0-2.17 1.12-2.17 2.16v12.75c0 12.13 10 24.66 24.1 24.66h15c1.34 0 2.01 0.88 2.01 2.01v13.06c0 1.24 0.96 2.22 2.09 2.22h11.17c1.13 0 1.88-1.05 1.88-2.1v-28.33c0-1.13-0.88-2.07-1.72-2.07z"
-        fill="#40C4F5"
+        fill={fill}
       />
       <path
         d="m119.9 57.61h-37.29c-1.51 0-2.31 1.23-2.31 2.45v11.18c0 1.48 1.05 2.37 2.31 2.37h14.53c1.42 0 1.67 1.23 1 2.45l-14.14 25.73c-0.88 1.69-0.21 3.03 1.46 3.03h12.68c1.17 0 1.83-1.05 2.59-2.46l21.86-38.23c1.67-3.11 0.17-5.82-2.69-6.52z"
