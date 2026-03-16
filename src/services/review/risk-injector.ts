@@ -15,6 +15,12 @@
 import { useReviewStore } from '@/services/review/review-store';
 import type { FileReview } from '@/types/review';
 import { getHealthLevel } from '@/services/review/health-monitor';
+import { isOttoMutating, guardedMutation, isInjectionCooldown } from '@/lib/dom-guard';
+
+const DEBUG = true;
+function dbg(msg: string, ...args: any[]) {
+  if (DEBUG) console.log(`[Otto:risk-injector] ${msg}`, ...args);
+}
 
 const INJECTED_ATTR = 'data-otto-risk-dot';
 
@@ -114,39 +120,41 @@ function getFilePathFromRow(row: Element): string | null {
 }
 
 function injectDots(riskMap: Map<string, RiskInfo>, isDark: boolean): void {
-  const rows = findFileTreeRows();
+  guardedMutation(() => {
+    const rows = findFileTreeRows();
 
-  for (const row of rows) {
-    const filePath = getFilePathFromRow(row);
-    if (!filePath) continue;
+    for (const row of rows) {
+      const filePath = getFilePathFromRow(row);
+      if (!filePath) continue;
 
-    const risk = riskMap.get(filePath);
-    if (!risk) continue;
+      const risk = riskMap.get(filePath);
+      if (!risk) continue;
 
-    const existing = injectedDots.get(filePath);
+      const existing = injectedDots.get(filePath);
 
-    if (existing) {
-      // Update existing dot if risk changed
-      if (existing.isConnected) {
-        existing.replaceWith(createDot(risk, isDark));
-        const newDot = row.querySelector(`[${INJECTED_ATTR}]`) as HTMLElement;
-        if (newDot) injectedDots.set(filePath, newDot);
-      } else {
-        // Detached — re-inject
-        injectedDots.delete(filePath);
+      if (existing) {
+        // Update existing dot if risk changed
+        if (existing.isConnected) {
+          existing.replaceWith(createDot(risk, isDark));
+          const newDot = row.querySelector(`[${INJECTED_ATTR}]`) as HTMLElement;
+          if (newDot) injectedDots.set(filePath, newDot);
+        } else {
+          // Detached — re-inject
+          injectedDots.delete(filePath);
+        }
+      }
+
+      if (!injectedDots.has(filePath)) {
+        // Find the name container to append the dot
+        const nameEl = row.querySelector('.file-row-name, .file-row-name-container, [data-testid="file-name"]');
+        if (nameEl && !nameEl.querySelector(`[${INJECTED_ATTR}]`)) {
+          const dot = createDot(risk, isDark);
+          nameEl.appendChild(dot);
+          injectedDots.set(filePath, dot);
+        }
       }
     }
-
-    if (!injectedDots.has(filePath)) {
-      // Find the name container to append the dot
-      const nameEl = row.querySelector('.file-row-name, .file-row-name-container, [data-testid="file-name"]');
-      if (nameEl && !nameEl.querySelector(`[${INJECTED_ATTR}]`)) {
-        const dot = createDot(risk, isDark);
-        nameEl.appendChild(dot);
-        injectedDots.set(filePath, dot);
-      }
-    }
-  }
+  });
 }
 
 function pruneDetached(): void {
@@ -190,6 +198,7 @@ export function startRiskInjection(isDarkMode: boolean, signal?: AbortSignal): (
   // Subscribe to store — update only when fileReviews reference changes
   const unsubscribe = useReviewStore.subscribe((state) => {
     if (state.fileReviews === prevFileReviews) return;
+    dbg(`store subscription: fileReviews changed (${prevFileReviews.length} → ${state.fileReviews.length})`);
     prevFileReviews = state.fileReviews;
 
     const newMap = computeRiskMap(state.fileReviews);
@@ -197,8 +206,28 @@ export function startRiskInjection(isDarkMode: boolean, signal?: AbortSignal): (
     debouncedUpdate();
   });
 
-  // MutationObserver for lazy-loaded file tree rows
-  const observer = new MutationObserver(debouncedUpdate);
+  // MutationObserver for lazy-loaded file tree rows.
+  // Only reacts when .file-row elements are added — ignores Otto's own
+  // dot injections which would otherwise trigger a rescan loop.
+  const observer = new MutationObserver((mutations) => {
+    if (isOttoMutating()) return; // Skip if Otto caused this mutation
+
+    // Only react to mutations that add file-row elements
+    let hasNewRows = false;
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches('.file-row') || node.querySelector('.file-row')) {
+          hasNewRows = true;
+          break;
+        }
+      }
+      if (hasNewRows) break;
+    }
+    if (!hasNewRows) return;
+
+    debouncedUpdate();
+  });
   const treeContainer = document.querySelector('.mr-tree-list, .diff-tree-list, [data-testid="file-tree-container"]');
   if (treeContainer) {
     observer.observe(treeContainer, { childList: true, subtree: true });
@@ -220,11 +249,30 @@ export function startRiskInjection(isDarkMode: boolean, signal?: AbortSignal): (
     }
   }
 
-  // Periodic rescan for virtual scrolling — skipped in critical health
+  // Periodic rescan for virtual scrolling — skipped in degraded/critical health
+  // and during injection cooldown (mutation-driven retries handle new files).
+  // Stops after 3 consecutive idle ticks — the MutationObserver still catches
+  // new file tree rows if they appear later.
+  let consecutiveIdleUpdates = 0;
   const rescanInterval = setInterval(() => {
-    if (getHealthLevel() === 'critical') return;
+    const health = getHealthLevel();
+    if (health === 'critical' || health === 'degraded') return;
+    if (isInjectionCooldown()) return;
+
+    const dotsBefore = injectedDots.size;
     update();
-  }, 3000);
+    const dotsAfter = injectedDots.size;
+    dbg(`rescan tick: dots ${dotsBefore}→${dotsAfter}, idle=${consecutiveIdleUpdates + (dotsAfter === dotsBefore ? 1 : 0)}/3`);
+
+    if (dotsAfter === dotsBefore) {
+      consecutiveIdleUpdates++;
+      if (consecutiveIdleUpdates >= 3) {
+        clearInterval(rescanInterval);
+      }
+    } else {
+      consecutiveIdleUpdates = 0;
+    }
+  }, 5250); // Staggered: offset from other injectors (3s, 3.75s, 4.5s)
 
   // Visibility change handler
   const visibilityHandler = () => {

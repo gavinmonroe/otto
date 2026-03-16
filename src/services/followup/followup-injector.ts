@@ -22,6 +22,12 @@ import { FollowUpButton } from '@/components/followup/FollowUpButton';
 import { FollowUpPanel } from '@/components/followup/FollowUpPanel';
 import { useReviewStore } from '@/services/review/review-store';
 import { getHealthLevel } from '@/services/review/health-monitor';
+import { isOttoMutating, guardedMutation, isInjectionCooldown } from '@/lib/dom-guard';
+
+const DEBUG = true;
+function dbg(msg: string, ...args: any[]) {
+  if (DEBUG) console.log(`[Otto:followup-injector] ${msg}`, ...args);
+}
 
 const BUTTON_ATTR = 'data-otto-followup-btn';
 const PANEL_ATTR = 'data-otto-followup-panel';
@@ -46,11 +52,35 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
   scanAndInjectButtons(isDarkMode);
 
   // Watch for new notes (lazy-loaded discussions, tab switches)
-  // Debounced to prevent cascading mutation storms on large MRs.
+  // Only schedules work when mutations contain note-like elements —
+  // ignores Otto's own injections (shadow DOM containers, risk dots, etc.)
+  // which would otherwise create a rolling cascade across injectors.
   let scanTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver((mutations) => {
     if (scanTimer) return;
+    if (isOttoMutating()) return; // Skip if Otto caused this mutation
+
+    // Only react to mutations that might contain new notes.
+    // Otto's own injections (shadow DOM, risk dots, inline comments) don't
+    // add .note or .timeline-entry elements, so we can safely skip them.
+    let hasRelevantNodes = false;
+    outer:
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (
+          node.matches('.note, .timeline-entry, [data-testid="note-wrapper"], [data-testid="noteable-note-container"]') ||
+          node.querySelector('.note, .timeline-entry, [data-testid="note-wrapper"]')
+        ) {
+          hasRelevantNodes = true;
+          break outer;
+        }
+      }
+    }
+    if (!hasRelevantNodes) return;
+
+    dbg(`MutationObserver: found relevant note nodes, scheduling scan`);
     scanTimer = setTimeout(() => {
       scanTimer = null;
       pruneDetachedButtons();
@@ -66,13 +96,31 @@ export function startFollowUpButtonInjection(isDarkMode: boolean, signal?: Abort
 
   // Periodic rescan — catches virtual scrolling edge cases where GitLab
   // destroys and recreates note elements without triggering useful mutations.
-  // Skipped in critical health to reduce main thread pressure.
+  // Skipped in degraded/critical health to reduce main thread pressure.
+  // Tracks consecutive idle ticks and stops after 3 — the MutationObserver
+  // still catches new notes if they appear later.
+  let consecutiveIdleScans = 0;
   const rescanInterval = setInterval(() => {
-    if (getHealthLevel() === 'critical') return;
+    const health = getHealthLevel();
+    if (health === 'critical' || health === 'degraded') return;
+    if (isInjectionCooldown()) return;
+
+    const buttonsBefore = mountedButtons.size;
     pruneDetachedButtons();
     pruneDetachedPanels();
     scanAndInjectButtons(isDarkMode);
-  }, 3000);
+    const buttonsAfter = mountedButtons.size;
+    dbg(`rescan tick: buttons ${buttonsBefore}→${buttonsAfter}, idle=${consecutiveIdleScans + (buttonsAfter === buttonsBefore ? 1 : 0)}/3`);
+
+    if (buttonsAfter === buttonsBefore) {
+      consecutiveIdleScans++;
+      if (consecutiveIdleScans >= 3) {
+        clearInterval(rescanInterval);
+      }
+    } else {
+      consecutiveIdleScans = 0;
+    }
+  }, 4500); // Staggered: offset from dom-observer (3s) and inline-injector (3.75s)
 
   // Rescan when tab becomes visible — GitLab may re-render discussions
   const handleVisibility = () => {
@@ -216,44 +264,46 @@ function injectButton(
   noteId: string,
   isDarkMode: boolean,
 ): void {
-  // Create container for the button
-  const container = document.createElement('div');
-  container.style.display = 'inline-flex';
-  container.style.alignItems = 'center';
-  container.style.marginLeft = '4px';
+  guardedMutation(() => {
+    // Create container for the button
+    const container = document.createElement('div');
+    container.style.display = 'inline-flex';
+    container.style.alignItems = 'center';
+    container.style.marginLeft = '4px';
 
-  // Insert into the action bar
-  actionBar.appendChild(container);
+    // Insert into the action bar
+    actionBar.appendChild(container);
 
-  // Shadow DOM for isolation
-  const shadow = container.attachShadow({ mode: 'open' });
+    // Shadow DOM for isolation
+    const shadow = container.attachShadow({ mode: 'open' });
 
-  const styleEl = document.createElement('style');
-  styleEl.textContent = getButtonShadowStyles(isDarkMode);
-  shadow.appendChild(styleEl);
+    const styleEl = document.createElement('style');
+    styleEl.textContent = getButtonShadowStyles(isDarkMode);
+    shadow.appendChild(styleEl);
 
-  const mountPoint = document.createElement('div');
-  shadow.appendChild(mountPoint);
+    const mountPoint = document.createElement('div');
+    shadow.appendChild(mountPoint);
 
-  const root = createRoot(mountPoint);
+    const root = createRoot(mountPoint);
 
-  const handleTogglePanel = (commentId: string) => {
-    togglePanel(noteElement, commentId, isDarkMode);
-  };
+    const handleTogglePanel = (commentId: string) => {
+      togglePanel(noteElement, commentId, isDarkMode);
+    };
 
-  root.render(
-    createElement(ThemeProvider, {
-      isDark: isDarkMode,
-      children: createElement(OttoErrorBoundary, { name: 'FollowUpButton' },
-        createElement(FollowUpButton, {
-          noteElement,
-          onTogglePanel: handleTogglePanel,
-        }),
-      ),
-    }),
-  );
+    root.render(
+      createElement(ThemeProvider, {
+        isDark: isDarkMode,
+        children: createElement(OttoErrorBoundary, { name: 'FollowUpButton' },
+          createElement(FollowUpButton, {
+            noteElement,
+            onTogglePanel: handleTogglePanel,
+          }),
+        ),
+      }),
+    );
 
-  mountedButtons.set(noteId, { root, container });
+    mountedButtons.set(noteId, { root, container });
+  });
 }
 
 // ---------------------------------------------------------------------------

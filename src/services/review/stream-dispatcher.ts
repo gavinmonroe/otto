@@ -262,9 +262,14 @@ export function dispatchStreamChunk(chunk: StreamChunk): void {
       break;
     }
     case 'STREAM_ALL_COMPLETE':
-      // Flush any remaining deltas before completing
+      // Flush any remaining deltas first so all data lands in the store.
       flushDeltas();
-      s.completeReview();
+      // Defer completeReview() to the next tick — this prevents a synchronous
+      // cascade where 6+ store subscribers (inline injector, risk dots,
+      // follow-up buttons, etc.) all fire in the same microtask, saturating
+      // the main thread. The 1-tick gap lets the browser paint and process
+      // events between the delta flush and the completion state change.
+      setTimeout(() => s.completeReview(), 0);
       break;
     case 'STREAM_REVIEW_PAUSED':
       // Review was paused (queue feature). Flush deltas so partial results

@@ -44,6 +44,23 @@ import { INITIAL_REVIEW_PROGRESS, INITIAL_TASK_PROGRESS } from './review-types';
 import type { CachedReview } from './review-cache';
 import type { HealthLevel } from './health-monitor';
 
+// --- Debug: track store update frequency ---
+let storeUpdateCount = 0;
+let storeUpdateTimer: ReturnType<typeof setInterval> | null = null;
+function startStoreUpdateCounter() {
+  if (storeUpdateTimer) return;
+  storeUpdateTimer = setInterval(() => {
+    if (storeUpdateCount > 0) {
+      console.log(`[Otto:store] ${storeUpdateCount} set() calls in last 1s`);
+      storeUpdateCount = 0;
+    }
+  }, 1000);
+}
+function countStoreUpdate() {
+  storeUpdateCount++;
+  startStoreUpdateCounter();
+}
+
 type ReviewState = {
   // MR context (set once when the page loads)
   mrContext: MrContext | null;
@@ -224,7 +241,14 @@ const INITIAL_STATE: ReviewState = {
   fixJobs: {},
 };
 
-export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) => ({
+export const useReviewStore = create<ReviewState & ReviewActions>()((rawSet, get) => {
+  // Wrap set to count updates for debugging
+  const set: typeof rawSet = (...args: any[]) => {
+    countStoreUpdate();
+    return (rawSet as any)(...args);
+  };
+
+  return {
   ...INITIAL_STATE,
 
   setMrContext: (context) => set({ mrContext: context }),
@@ -595,4 +619,5 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((set, get) =
     const { [commentId]: _, ...remaining } = state.fixJobs;
     return { fixJobs: remaining };
   }),
-}));
+};
+});

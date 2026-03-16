@@ -39,6 +39,7 @@ import type { ReviewTask } from '@/services/review/review-types';
 import type { OttoSettings } from '@/types/settings';
 import { startHealthMonitor } from '@/services/review/health-monitor';
 import { HealthWarningToast } from '@/components/review/HealthWarningToast';
+import { guardedMutation } from '@/lib/dom-guard';
 import { getBottoClient, disconnectBotto } from '@/lib/botto-client';
 import { registerBottoTransport } from '@/lib/messaging';
 
@@ -219,6 +220,12 @@ async function initDiffsFeatures(
 
   useReviewStore.getState().setMrContext(mrContext);
 
+  // Load cached review BEFORE starting injectors. This way injectors see
+  // the data in their initial state (cheap) instead of reacting to a store
+  // update after subscribing (expensive — triggers 40+ React re-renders and
+  // all injector subscriptions simultaneously).
+  const hasCachedReview = await tryLoadCachedReview(mrContext);
+
   // Overview panel is always mounted — it shows disabled states for
   // turned-off features and lets users click to run them ad-hoc.
   await mountOverviewPanel(ctx, isDarkMode);
@@ -242,8 +249,10 @@ async function initDiffsFeatures(
   // Keyboard shortcuts always active (they navigate existing UI)
   startKeyboardManager(ctx.signal);
 
-  // Load cached review or auto-review if preference is enabled
-  await loadOrAutoReview(mrContext, enabled);
+  // Auto-review if no cached review was found
+  if (!hasCachedReview) {
+    await loadOrAutoReview(mrContext, enabled);
+  }
 }
 
 async function mountOverviewPanel(
@@ -283,30 +292,32 @@ function mountFileReviewCard(
   if (!fileActions) return;
   if (fileActions.querySelector('[data-otto-file-review]')) return;
 
-  const ottoContainer = document.createElement('div');
-  ottoContainer.setAttribute('data-otto-file-review', filePath);
-  ottoContainer.style.display = 'inline-flex';
-  ottoContainer.style.alignItems = 'center';
-  ottoContainer.style.marginRight = '4px';
+  guardedMutation(() => {
+    const ottoContainer = document.createElement('div');
+    ottoContainer.setAttribute('data-otto-file-review', filePath);
+    ottoContainer.style.display = 'inline-flex';
+    ottoContainer.style.alignItems = 'center';
+    ottoContainer.style.marginRight = '4px';
 
-  fileActions.insertBefore(ottoContainer, fileActions.firstChild);
+    fileActions.insertBefore(ottoContainer, fileActions.firstChild);
 
-  const shadow = ottoContainer.attachShadow({ mode: 'open' });
+    const shadow = ottoContainer.attachShadow({ mode: 'open' });
 
-  const styleEl = document.createElement('style');
-  styleEl.textContent = getButtonStyles(isDarkMode);
-  shadow.appendChild(styleEl);
+    const styleEl = document.createElement('style');
+    styleEl.textContent = getButtonStyles(isDarkMode);
+    shadow.appendChild(styleEl);
 
-  const mountPoint = document.createElement('div');
-  shadow.appendChild(mountPoint);
+    const mountPoint = document.createElement('div');
+    shadow.appendChild(mountPoint);
 
-  const root = createRoot(mountPoint);
-  root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'FileReview' }, createElement(FileReviewCard, { filePath })) }));
+    const root = createRoot(mountPoint);
+    root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'FileReview' }, createElement(FileReviewCard, { filePath })) }));
 
-  ctx.signal.addEventListener('abort', () => {
-    root.unmount();
-    ottoContainer.remove();
-  }, { once: true });
+    ctx.signal.addEventListener('abort', () => {
+      root.unmount();
+      ottoContainer.remove();
+    }, { once: true });
+  });
 }
 
 /**
@@ -324,29 +335,31 @@ function mountFileReviewFooter(
   if (!diffContent) return;
   if (fileElement.querySelector('[data-otto-file-footer]')) return;
 
-  const footerContainer = document.createElement('div');
-  footerContainer.setAttribute('data-otto-file-footer', filePath);
+  guardedMutation(() => {
+    const footerContainer = document.createElement('div');
+    footerContainer.setAttribute('data-otto-file-footer', filePath);
 
-  // Append after the diff content, still inside the .diff-file
-  diffContent.insertAdjacentElement('afterend', footerContainer);
+    // Append after the diff content, still inside the .diff-file
+    diffContent.insertAdjacentElement('afterend', footerContainer);
 
-  const shadow = footerContainer.attachShadow({ mode: 'open' });
+    const shadow = footerContainer.attachShadow({ mode: 'open' });
 
-  // Inject minimal reset styles for the footer shadow DOM
-  const styleEl = document.createElement('style');
-  styleEl.textContent = getFooterResetStyles();
-  shadow.appendChild(styleEl);
+    // Inject minimal reset styles for the footer shadow DOM
+    const styleEl = document.createElement('style');
+    styleEl.textContent = getFooterResetStyles();
+    shadow.appendChild(styleEl);
 
-  const mountPoint = document.createElement('div');
-  shadow.appendChild(mountPoint);
+    const mountPoint = document.createElement('div');
+    shadow.appendChild(mountPoint);
 
-  const root = createRoot(mountPoint);
-  root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'FileFooter' }, createElement(FileReviewFooter, { filePath })) }));
+    const root = createRoot(mountPoint);
+    root.render(createElement(ThemeProvider, { isDark: isDarkMode, children: createElement(OttoErrorBoundary, { name: 'FileFooter' }, createElement(FileReviewFooter, { filePath })) }));
 
-  ctx.signal.addEventListener('abort', () => {
-    root.unmount();
-    footerContainer.remove();
-  }, { once: true });
+    ctx.signal.addEventListener('abort', () => {
+      root.unmount();
+      footerContainer.remove();
+    }, { once: true });
+  });
 }
 
 function detectDarkMode(): boolean {
@@ -501,9 +514,10 @@ async function loadOrAutoReview(
     }
   }
 
-  // No active queue item — try loading from cache (completed reviews)
-  const cached = await tryLoadCachedReview(mrContext);
-  if (cached) return; // Cache hit — no need to call AI
+  // Cache was already checked and hydrated by initDiffsFeatures before
+  // injectors started. If the store has data, skip straight to done.
+  const storeState = useReviewStore.getState();
+  if (storeState.status === 'complete' || storeState.fileReviews.length > 0) return;
 
   const settingsResult = await sendMessage({ type: 'GET_SETTINGS' });
   if (!settingsResult.ok) return;
