@@ -8,7 +8,8 @@
 // Supports dark mode via saved preference or system prefers-color-scheme.
 // ---------------------------------------------------------------------------
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import type { OttoSettings } from '@/types/settings';
 import { useSettings } from '@/hooks/use-settings';
 import { AiProviderForm } from '@/components/settings/AiProviderForm';
 import { CustomPromptsForm } from '@/components/settings/CustomPromptsForm';
@@ -18,6 +19,7 @@ import { ReviewerPreferencesForm } from '@/components/settings/ReviewerPreferenc
 import { FeatureTogglesForm } from '@/components/settings/FeatureTogglesForm';
 import { BottoConnectionForm } from '@/components/settings/BottoConnectionForm';
 import { OttoLogo } from '@/components/OttoLogo';
+import { exportConfig, importConfig } from '@/lib/settings-io';
 
 function useIsDark(themePref: 'light' | 'dark' | 'auto'): boolean {
   const [systemDark, setSystemDark] = useState(
@@ -93,6 +95,9 @@ export function App() {
         <JiraConnectionForm settings={settings} onUpdate={updateSettings} />
         <ReviewerPreferencesForm settings={settings} />
 
+        {/* Import / Export */}
+        <ConfigPortSection settings={settings} onUpdate={updateSettings} theme={t} />
+
         {/* Preferences */}
         <div style={{ ...sectionStyle, background: t.cardBg, borderColor: t.border }}>
           <h3 style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 600, color: t.text }}>Preferences</h3>
@@ -157,6 +162,129 @@ export function App() {
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Import / Export Config
+// ---------------------------------------------------------------------------
+
+function ConfigPortSection({
+  settings,
+  onUpdate,
+  theme: t,
+}: {
+  settings: OttoSettings;
+  onUpdate: (updates: Partial<OttoSettings>) => Promise<void>;
+  theme: OptionsTheme;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [status, setStatus] = useState<
+    | { type: 'idle' }
+    | { type: 'success'; warnings: string[] }
+    | { type: 'error'; message: string }
+  >({ type: 'idle' });
+
+  const handleExport = useCallback(() => {
+    exportConfig(settings);
+  }, [settings]);
+
+  const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset the input so the same file can be re-selected
+    e.target.value = '';
+
+    const result = await importConfig(file, settings);
+    if (!result.ok) {
+      setStatus({ type: 'error', message: result.error });
+      return;
+    }
+
+    await onUpdate(result.settings);
+    setStatus({ type: 'success', warnings: result.warnings });
+  }, [settings, onUpdate]);
+
+  return (
+    <div style={{ ...sectionStyle, background: t.cardBg, borderColor: t.border }}>
+      <h3 style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 600, color: t.text }}>
+        Import / Export Config
+      </h3>
+      <p style={{ margin: '0 0 16px', fontSize: '13px', color: t.textMuted }}>
+        Share your Otto configuration with your team. Secrets (API keys, PATs, tokens) are
+        stripped on export and preserved on import.
+      </p>
+
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <button onClick={handleExport} style={configButtonStyle(t)}>
+          Export Config
+        </button>
+        <button onClick={() => fileInputRef.current?.click()} style={configButtonStyle(t)}>
+          Import Config
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          onChange={handleImport}
+          style={{ display: 'none' }}
+        />
+      </div>
+
+      {status.type === 'success' && (
+        <div style={{
+          marginTop: '12px',
+          padding: '10px 14px',
+          background: isDarkTheme(t) ? '#052e16' : '#f0fdf4',
+          color: isDarkTheme(t) ? '#86efac' : '#166534',
+          border: `1px solid ${isDarkTheme(t) ? '#14532d' : '#bbf7d0'}`,
+          borderRadius: '8px',
+          fontSize: '13px',
+        }}>
+          <span>Config imported successfully.</span>
+          {status.warnings.length > 0 && (
+            <ul style={{ margin: '8px 0 0', paddingLeft: '18px' }}>
+              {status.warnings.map((w, i) => (
+                <li key={i} style={{ marginBottom: '2px' }}>{w}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {status.type === 'error' && (
+        <div style={{
+          marginTop: '12px',
+          padding: '10px 14px',
+          background: t.errorBg,
+          color: t.error,
+          border: `1px solid ${t.errorBorder}`,
+          borderRadius: '8px',
+          fontSize: '13px',
+        }}>
+          {status.message}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function configButtonStyle(t: OptionsTheme): React.CSSProperties {
+  return {
+    padding: '6px 14px',
+    borderRadius: '6px',
+    background: isDarkTheme(t) ? '#374151' : '#f3f4f6',
+    color: t.text,
+    border: `1px solid ${t.border}`,
+    fontSize: '13px',
+    fontWeight: 500,
+    cursor: 'pointer',
+  };
+}
+
+/** Quick check — the theme object doesn't carry an isDark flag, so infer from bg. */
+function isDarkTheme(t: OptionsTheme): boolean {
+  return t.bg === '#111827';
 }
 
 // ---------------------------------------------------------------------------
