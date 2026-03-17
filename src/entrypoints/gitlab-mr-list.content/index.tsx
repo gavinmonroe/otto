@@ -30,7 +30,7 @@ import type {
 import type { ReviewTask } from '@/services/review/review-types';
 import { getBottoClient, disconnectBotto } from '@/lib/botto-client';
 import { registerBottoTransport } from '@/lib/messaging';
-import { DEFAULT_HUE, getBrandColor, getLogoColor } from '@/lib/palette';
+import { DEFAULT_HUE, setGlobalBrandHue, getBrandColor, getLogoColor } from '@/lib/palette';
 export default defineContentScript({
   matches: ['*://*/*'],
   runAt: 'document_idle',
@@ -92,6 +92,7 @@ export default defineContentScript({
     // If queue feature is enabled, run the full command center.
     // Otherwise, fall back to basic preview strips only.
     const brandHueForMount = settings.preferences.brandHue ?? DEFAULT_HUE;
+    setGlobalBrandHue(brandHueForMount);
     if (settings.preferences.enabledFeatures?.mrReviewQueue !== false) {
       await initMrListCommandCenter(ctx, listInfo, brandHueForMount);
     } else {

@@ -45,7 +45,7 @@ import { registerBottoTransport } from '@/lib/messaging';
 import { usePresenceStore } from '@/services/presence/presence-store';
 import { startViewportTracker } from '@/services/presence/viewport-tracker';
 import { startPresenceInjection } from '@/services/presence/presence-injector';
-import { DEFAULT_HUE, generateCssVariables, getInjectorColors, getLogoColor, hslToHex } from '@/lib/palette';
+import { DEFAULT_HUE, setGlobalBrandHue, generateCssVariables, getInjectorColors, getLogoColor, hslToHex } from '@/lib/palette';
 import { useInquiryStore } from '@/services/inquiry/inquiry-store';
 import { startInquirySelection } from '@/services/inquiry/selection-manager';
 import { startTeamInquiryInjection } from '@/services/inquiry/team-inquiry-injector';
@@ -91,6 +91,7 @@ export default defineContentScript({
     const settings: OttoSettings | null = settingsResult.ok ? settingsResult.data : null;
     const enabled = settings?.preferences.enabledFeatures;
     const brandHue = settings?.preferences.brandHue ?? DEFAULT_HUE;
+    setGlobalBrandHue(brandHue);
 
     // Initialize Botto client if configured — must happen before any review streams.
     // Store settings on globalThis so stream-dispatcher can access them synchronously.

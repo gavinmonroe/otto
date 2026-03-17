@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { generateTheme, DEFAULT_HUE } from '@/lib/palette';
+import { generateTheme, DEFAULT_HUE, getGlobalBrandHue } from '@/lib/palette';
 
 export type OttoTheme = {
   isDark: boolean;
@@ -75,7 +75,7 @@ type ThemeProviderProps = {
 };
 
 export function ThemeProvider({ isDark, hue, children }: ThemeProviderProps) {
-  const resolvedHue = hue ?? DEFAULT_HUE;
+  const resolvedHue = hue ?? getGlobalBrandHue();
   const theme = useMemo(() => generateTheme(resolvedHue, isDark), [resolvedHue, isDark]);
 
   return (

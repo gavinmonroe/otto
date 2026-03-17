@@ -20,6 +20,24 @@ import type { OttoTheme } from '@/components/ThemeContext';
 export const DEFAULT_HUE = 207;
 
 // ---------------------------------------------------------------------------
+// Global brand hue — set once by the content script at startup.
+// ThemeProvider uses this as its fallback when no explicit `hue` prop is
+// passed, so every shadow DOM mount automatically gets the user's configured
+// hue without manual threading.
+// ---------------------------------------------------------------------------
+let globalBrandHue: number | undefined;
+
+/** Set the global brand hue. Call once from the content script after reading settings. */
+export function setGlobalBrandHue(hue: number): void {
+  globalBrandHue = hue;
+}
+
+/** Get the global brand hue, falling back to DEFAULT_HUE if not set. */
+export function getGlobalBrandHue(): number {
+  return globalBrandHue ?? DEFAULT_HUE;
+}
+
+// ---------------------------------------------------------------------------
 // HSL ↔ Hex conversion
 // ---------------------------------------------------------------------------
 
