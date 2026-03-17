@@ -137,7 +137,7 @@ export function GitLabFileLink({
                 gap: '3px',
                 fontSize: '11px',
                 padding: '2px 4px',
-                borderRadius: '3px',
+                borderRadius: '6px',
               }}
               title={previewOpen ? 'Hide preview' : 'Preview file'}
             >

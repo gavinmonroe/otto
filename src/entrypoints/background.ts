@@ -21,7 +21,7 @@ import { loadSettings, saveSettings } from '@/lib/storage';
 import * as gitlab from '@/services/gitlab/gitlab-client';
 import * as aiClient from '@/services/ai/ai-client';
 import { executeReview } from '@/services/review/review-orchestrator';
-import { generateFollowUp, generateChatResponse } from '@/services/ai/ai-service';
+import { generateFollowUp, generateChatResponse, generateInquiryResponse } from '@/services/ai/ai-service';
 import { loadCachedFollowUp, saveCachedFollowUp } from '@/services/followup/followup-cache';
 import { fetchJiraTicket, testJiraConnection } from '@/services/ticket/jira-client';
 import { loadCachedTicket, saveCachedTicket, loadCachedTickets } from '@/services/ticket/ticket-cache';
@@ -826,6 +826,39 @@ export default defineBackground(() => {
         });
       } else {
         send({ type: 'STREAM_CHAT_ERROR', payload: { error: result.error } });
+      }
+      return;
+    }
+
+    if (request.type === 'STREAM_INQUIRY') {
+      const settings = await loadSettings();
+
+      if (!settings.ai.baseUrl) {
+        send({
+          type: 'STREAM_INQUIRY_ERROR',
+          payload: { error: 'AI provider not configured. Open Otto settings to set up your AI endpoint.' },
+        });
+        return;
+      }
+
+      const { inquiryContext, question } = request.payload;
+
+      const result = await generateInquiryResponse(
+        settings.ai,
+        inquiryContext,
+        question,
+        (delta) => {
+          send({ type: 'STREAM_INQUIRY_DELTA', payload: { content: delta } });
+        },
+      );
+
+      if (result.ok) {
+        send({
+          type: 'STREAM_INQUIRY_COMPLETE',
+          payload: { content: result.data },
+        });
+      } else {
+        send({ type: 'STREAM_INQUIRY_ERROR', payload: { error: result.error } });
       }
       return;
     }

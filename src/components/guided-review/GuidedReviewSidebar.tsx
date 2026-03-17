@@ -74,7 +74,7 @@ export function GuidedReviewSidebar({ slides, completionMap, activeIndex, onJump
             flex: 1,
             height: '3px',
             borderRadius: '2px',
-            background: theme.isDark ? '#374151' : '#e5e7eb',
+            background: theme.bgMuted,
             overflow: 'hidden',
           }}>
             <div style={{
@@ -153,7 +153,7 @@ const SidebarItem = forwardRef<HTMLButtonElement, {
         width: '100%',
         padding: '6px 10px',
         background: isActive
-          ? (theme.isDark ? '#1e3a5f' : '#eff6ff')
+          ? theme.infoBg
           : 'transparent',
         border: 'none',
         borderLeft: isActive ? `2px solid ${theme.brand}` : '2px solid transparent',
@@ -225,17 +225,17 @@ function getSlideIcon(slide: ReviewSlide, theme: OttoTheme): { icon: typeof Aler
   switch (slide.kind) {
     case 'comment': {
       const colors = {
-        critical: { icon: AlertCircle, color: theme.isDark ? '#fca5a5' : '#dc2626' },
-        warning: { icon: AlertTriangle, color: theme.isDark ? '#fbbf24' : '#d97706' },
-        suggestion: { icon: Lightbulb, color: theme.isDark ? '#93c5fd' : '#2563eb' },
-        info: { icon: Info, color: theme.isDark ? '#a5b4fc' : '#4f46e5' },
+        critical: { icon: AlertCircle, color: theme.error },
+        warning: { icon: AlertTriangle, color: theme.warning },
+        suggestion: { icon: Lightbulb, color: theme.info },
+        info: { icon: Info, color: theme.info },
       };
       return colors[slide.comment.severity] ?? colors.info;
     }
     case 'edgeCase':
-      return { icon: Zap, color: theme.isDark ? '#fbbf24' : '#d97706' };
+      return { icon: Zap, color: theme.warning };
     case 'thread':
-      return { icon: MessageSquare, color: theme.isDark ? '#fbbf24' : '#d97706' };
+      return { icon: MessageSquare, color: theme.warning };
   }
 }
 

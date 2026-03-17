@@ -33,10 +33,10 @@ export function InlineCommentThread({ comment, onUpdateStatus }: InlineCommentTh
   const isDismissed = comment.status === 'dismissed';
 
   const severityConfig = {
-    critical: { icon: AlertCircle, color: theme.isDark ? '#fca5a5' : '#dc2626', bg: theme.isDark ? '#450a0a' : '#fef2f2' },
-    warning: { icon: AlertTriangle, color: theme.isDark ? '#fbbf24' : '#d97706', bg: theme.isDark ? '#451a03' : '#fffbeb' },
-    suggestion: { icon: Lightbulb, color: theme.isDark ? '#93c5fd' : '#2563eb', bg: theme.isDark ? '#1e3a5f' : '#eff6ff' },
-    info: { icon: Info, color: theme.isDark ? '#a5b4fc' : '#4f46e5', bg: theme.isDark ? '#1e1b4b' : '#eef2ff' },
+    critical: { icon: AlertCircle, color: theme.error, bg: theme.errorBg },
+    warning: { icon: AlertTriangle, color: theme.warning, bg: theme.warningBg },
+    suggestion: { icon: Lightbulb, color: theme.info, bg: theme.infoBg },
+    info: { icon: Info, color: theme.info, bg: theme.infoBg },
   };
 
   const config = severityConfig[comment.severity] || severityConfig.info;
@@ -55,7 +55,7 @@ export function InlineCommentThread({ comment, onUpdateStatus }: InlineCommentTh
           <span style={{
             fontSize: '11px',
             padding: '1px 6px',
-            borderRadius: '3px',
+            borderRadius: '6px',
             background: config.bg,
             color: config.color,
             fontWeight: 600,
@@ -123,13 +123,13 @@ export function InlineCommentThread({ comment, onUpdateStatus }: InlineCommentTh
             <div style={s.actions}>
               <button
                 onClick={() => onUpdateStatus(comment.id, 'accepted')}
-                style={{ ...s.actionBtn, background: theme.isDark ? '#064e3b' : '#f0fdf4', color: theme.success }}
+                style={{ ...s.actionBtn, background: theme.successBg, color: theme.success }}
               >
                 Accept
               </button>
               <button
                 onClick={() => onUpdateStatus(comment.id, 'dismissed')}
-                style={{ ...s.actionBtn, background: theme.isDark ? '#450a0a' : '#fef2f2', color: theme.error }}
+                style={{ ...s.actionBtn, background: theme.errorBg, color: theme.error }}
               >
                 Dismiss
               </button>
@@ -163,7 +163,7 @@ function buildStyles(theme: OttoTheme, accentColor: string, isDismissed: boolean
   return {
     container: {
       borderLeft: `3px solid ${accentColor}`,
-      background: theme.isDark ? '#1a1f2e' : '#f8faff',
+      background: theme.bgInset,
       borderBottom: `1px solid ${theme.border}`,
       opacity: isDismissed ? 0.5 : 1,
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -201,7 +201,7 @@ function buildStyles(theme: OttoTheme, accentColor: string, isDismissed: boolean
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: '4px',
+      borderRadius: '6px',
       border: `1px solid ${theme.border}`,
       background: theme.bgSubtle,
       color: theme.textSecondary,
@@ -222,7 +222,7 @@ function buildStyles(theme: OttoTheme, accentColor: string, isDismissed: boolean
 
     actionBtn: {
       padding: '3px 10px',
-      borderRadius: '4px',
+      borderRadius: '6px',
       border: 'none',
       fontSize: '12px',
       fontWeight: 500,

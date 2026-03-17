@@ -32,7 +32,7 @@ export function TrustBadge({ trust, compact = false }: TrustBadgeProps) {
       <span style={{
         fontSize: '10px',
         padding: '1px 5px',
-        borderRadius: '3px',
+        borderRadius: '6px',
         background: config.bg,
         color: config.color,
         fontWeight: 600,
@@ -46,7 +46,7 @@ export function TrustBadge({ trust, compact = false }: TrustBadgeProps) {
     <div style={{
       padding: '6px 8px',
       background: config.bg,
-      borderRadius: '4px',
+      borderRadius: '6px',
       borderLeft: `3px solid ${config.color}`,
       fontSize: '12px',
     }}>

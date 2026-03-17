@@ -113,12 +113,8 @@ export function HealthWarningToast() {
 
 function buildStyles(t: OttoTheme, isCritical: boolean, fadingOut: boolean) {
   const accentColor = isCritical ? t.error : t.warning;
-  const bgColor = isCritical
-    ? (t.isDark ? '#2d1215' : '#fef2f2')
-    : (t.isDark ? '#2d2305' : '#fffbeb');
-  const borderColor = isCritical
-    ? (t.isDark ? '#7f1d1d' : '#fecaca')
-    : (t.isDark ? '#78350f' : '#fde68a');
+  const bgColor = isCritical ? t.errorBg : t.warningBg;
+  const borderColor = isCritical ? t.errorBorder : t.warningBorder;
 
   return {
     container: {
@@ -173,7 +169,7 @@ function buildStyles(t: OttoTheme, isCritical: boolean, fadingOut: boolean) {
       padding: '2px',
       cursor: 'pointer',
       color: t.textMuted,
-      borderRadius: '4px',
+      borderRadius: '6px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',

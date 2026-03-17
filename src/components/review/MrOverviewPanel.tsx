@@ -223,7 +223,7 @@ export function MrOverviewPanel() {
                   border: 'none',
                   cursor: 'pointer',
                   background: reviewMode === 'default'
-                    ? (theme.isDark ? '#1e3a5f' : '#eff6ff')
+                    ? theme.infoBg
                     : 'transparent',
                   color: reviewMode === 'default' ? theme.brand : theme.textMuted,
                 }}
@@ -245,7 +245,7 @@ export function MrOverviewPanel() {
                   borderLeft: `1px solid ${theme.borderSubtle}`,
                   cursor: 'pointer',
                   background: reviewMode === 'guided'
-                    ? (theme.isDark ? '#1e3a5f' : '#eff6ff')
+                    ? theme.infoBg
                     : 'transparent',
                   color: reviewMode === 'guided' ? theme.brand : theme.textMuted,
                 }}
@@ -337,7 +337,7 @@ export function MrOverviewPanel() {
         <div style={s.section}>
           <div style={s.sectionHeader}>Summary</div>
           {review.progress.summary.status === 'error' && !review.summary && (
-            <div style={{ fontSize: '12px', color: theme.error, padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '12px', color: theme.error, padding: '6px 8px', background: theme.errorBg, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>{review.progress.summary.error || 'Summary generation failed.'}</span>
               <button onClick={() => review.retryTasks(['summary'])} style={s.retryButton}>Retry</button>
             </div>
@@ -357,7 +357,7 @@ export function MrOverviewPanel() {
                       fontSize: '11px',
                       padding: '2px 8px',
                       borderRadius: '10px',
-                      background: theme.isDark ? '#1e293b' : '#f1f5f9',
+                      background: theme.bgMuted,
                       color: theme.textSecondary,
                       border: `1px solid ${theme.borderSubtle}`,
                     }}>
@@ -372,7 +372,7 @@ export function MrOverviewPanel() {
                 marginTop: '6px',
                 padding: '4px 8px',
                 background: theme.bgSubtle,
-                borderRadius: '4px',
+                borderRadius: '6px',
                 borderLeft: `3px solid ${
                   review.summary.riskAssessment.toLowerCase().includes('high') ? theme.error
                   : review.summary.riskAssessment.toLowerCase().includes('medium') ? theme.warning
@@ -390,7 +390,7 @@ export function MrOverviewPanel() {
                   marginTop: '6px',
                   padding: '4px 8px',
                   background: theme.bgSubtle,
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   fontStyle: 'italic',
                 }}>
                   No recent file activity in the last 30 days.
@@ -402,7 +402,7 @@ export function MrOverviewPanel() {
                   marginTop: '6px',
                   padding: '6px 8px',
                   background: theme.bgSubtle,
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   borderLeft: `3px solid ${theme.warning}`,
                 }}>
                   <div style={{ fontWeight: 600, fontSize: '11px', color: theme.warning, marginBottom: '4px' }}>
@@ -444,7 +444,7 @@ export function MrOverviewPanel() {
       {/* Code Review error/retry — shown when file reviews fail */}
       {review.progress.codeReview.status === 'error' && review.fileReviews.length === 0 && (
         <div style={s.section}>
-          <div style={{ fontSize: '12px', color: theme.error, padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: '12px', color: theme.error, padding: '6px 8px', background: theme.errorBg, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span>{review.progress.codeReview.error || 'File reviews failed.'}</span>
             <button onClick={() => review.retryTasks(['codeReview'])} style={s.retryButton}>Retry</button>
           </div>
@@ -510,7 +510,7 @@ export function MrOverviewPanel() {
             <RelatedFilesPanel files={review.relatedFiles} />
           )}
           {showRelated && review.progress.relatedFiles?.status === 'error' && (
-            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>{review.progress.relatedFiles.error || 'Related files discovery failed.'}</span>
               <button
                 onClick={() => review.retryTasks(['relatedFiles'])}
@@ -540,7 +540,7 @@ export function MrOverviewPanel() {
             <EdgeCaseAnalysis edgeCases={review.edgeCases} />
           )}
           {showEdgeCases && review.progress.edgeCases.status === 'error' && review.progress.edgeCases.error && (
-            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>{review.progress.edgeCases.error}</span>
               <button
                 onClick={() => review.retryTasks(['edgeCases'])}
@@ -614,7 +614,7 @@ export function MrOverviewPanel() {
             <BehavioralDeltaPanel data={review.verification.behavioralDelta} />
           )}
           {showBehavioralDelta && review.progress.behavioralDelta.status === 'error' && review.progress.behavioralDelta.error && (
-            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>{review.progress.behavioralDelta.error}</span>
               <button onClick={() => review.retryTasks(['behavioralDelta'])} style={s.retryButton}>Retry</button>
             </div>
@@ -645,7 +645,7 @@ export function MrOverviewPanel() {
             <AdversarialTestsPanel data={review.verification.adversarialTests} trust={review.verification.trust} />
           )}
           {showAdversarialTests && review.progress.adversarialTests.status === 'error' && review.progress.adversarialTests.error && (
-            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>{review.progress.adversarialTests.error}</span>
               <button onClick={() => review.retryTasks(['adversarialTests'])} style={s.retryButton}>Retry</button>
             </div>
@@ -676,7 +676,7 @@ export function MrOverviewPanel() {
             <ContractsPanel data={review.verification.contracts} />
           )}
           {showContracts && review.progress.contracts.status === 'error' && review.progress.contracts.error && (
-            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '12px', color: theme.error, marginTop: '6px', padding: '6px 8px', background: theme.errorBg, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>{review.progress.contracts.error}</span>
               <button onClick={() => review.retryTasks(['contracts'])} style={s.retryButton}>Retry</button>
             </div>
@@ -745,7 +745,7 @@ function DisabledFeatureRow({
         <span style={{
           fontSize: '10px',
           padding: '1px 5px',
-          borderRadius: '3px',
+          borderRadius: '6px',
           background: theme.bgMuted,
           color: theme.textMuted,
           fontWeight: 500,
@@ -760,7 +760,7 @@ function DisabledFeatureRow({
           alignItems: 'center',
           gap: '4px',
           padding: '3px 8px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           background: 'transparent',
           color: theme.brand,
           border: `1px solid ${theme.borderSubtle}`,
@@ -809,7 +809,7 @@ function FileActivitySummary({ fileActivity, theme, hostUrl }: { fileActivity: F
           padding: '6px 8px',
           marginBottom: '4px',
           background: theme.bgSubtle,
-          borderRadius: '4px',
+          borderRadius: '6px',
           borderLeft: `3px solid ${theme.warning}`,
         }}>
           <div style={{
@@ -860,9 +860,9 @@ function AcStatusPills({ acValidation, theme }: { acValidation: AcValidationData
     <span style={{ display: 'inline-flex', gap: '4px', marginLeft: '4px' }}>
       {satisfiedCount > 0 && (
         <span style={{
-          fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
-          background: theme.isDark ? '#064e3b' : '#f0fdf4',
-          color: theme.isDark ? '#4ade80' : '#16a34a',
+          fontSize: '10px', padding: '1px 5px', borderRadius: '6px',
+          background: theme.successBg,
+          color: theme.success,
           fontWeight: 600,
         }}>
           {satisfiedCount} met
@@ -870,9 +870,9 @@ function AcStatusPills({ acValidation, theme }: { acValidation: AcValidationData
       )}
       {unclearCount > 0 && (
         <span style={{
-          fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
-          background: theme.isDark ? '#451a03' : '#fffbeb',
-          color: theme.isDark ? '#fbbf24' : '#d97706',
+          fontSize: '10px', padding: '1px 5px', borderRadius: '6px',
+          background: theme.warningBg,
+          color: theme.warning,
           fontWeight: 600,
         }}>
           {unclearCount} unclear
@@ -880,9 +880,9 @@ function AcStatusPills({ acValidation, theme }: { acValidation: AcValidationData
       )}
       {notFoundCount > 0 && (
         <span style={{
-          fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
-          background: theme.isDark ? '#450a0a' : '#fef2f2',
-          color: theme.isDark ? '#fca5a5' : '#dc2626',
+          fontSize: '10px', padding: '1px 5px', borderRadius: '6px',
+          background: theme.errorBg,
+          color: theme.error,
           fontWeight: 600,
         }}>
           {notFoundCount} not found
@@ -896,18 +896,18 @@ function AcValidationPanel({ acValidation, theme }: { acValidation: AcValidation
   const statusConfig: Record<AcValidationStatus, { icon: string; color: string; bg: string }> = {
     satisfied: {
       icon: '\u2713',
-      color: theme.isDark ? '#4ade80' : '#16a34a',
-      bg: theme.isDark ? '#064e3b' : '#f0fdf4',
+      color: theme.success,
+      bg: theme.successBg,
     },
     unclear: {
       icon: '?',
-      color: theme.isDark ? '#fbbf24' : '#d97706',
-      bg: theme.isDark ? '#451a03' : '#fffbeb',
+      color: theme.warning,
+      bg: theme.warningBg,
     },
     'not-found': {
       icon: '\u2717',
-      color: theme.isDark ? '#fca5a5' : '#dc2626',
-      bg: theme.isDark ? '#450a0a' : '#fef2f2',
+      color: theme.error,
+      bg: theme.errorBg,
     },
   };
 
@@ -930,7 +930,7 @@ function AcValidationPanel({ acValidation, theme }: { acValidation: AcValidation
                 padding: '6px 8px',
                 marginBottom: '4px',
                 background: config.bg,
-                borderRadius: '4px',
+                borderRadius: '6px',
                 borderLeft: `3px solid ${config.color}`,
               }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
@@ -1057,7 +1057,7 @@ function buildStyles(t: OttoTheme) {
 
     iconButton: {
       padding: '4px',
-      borderRadius: '4px',
+      borderRadius: '6px',
       background: 'transparent',
       border: 'none',
       color: t.textSecondary,
@@ -1095,7 +1095,7 @@ function buildStyles(t: OttoTheme) {
 
     retryButton: {
       padding: '3px 10px',
-      borderRadius: '4px',
+      borderRadius: '6px',
       background: t.btnSecondaryBg,
       color: t.btnSecondaryText,
       border: `1px solid ${t.btnSecondaryBorder}`,

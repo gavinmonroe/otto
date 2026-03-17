@@ -5,11 +5,12 @@
 //
 // Design:
 //   - Monospace, dark background, auto-scrolls to bottom
-//   - stderr lines in muted red/orange
+//   - stderr lines use theme error color
 //   - Collapsible via header click
 //   - Max height 200px with overflow scroll
 //   - Inline styles (shadow DOM compatible)
 //   - 500-line cap enforced by the store
+//   - All colors derived from theme (hue-aware)
 // ---------------------------------------------------------------------------
 
 import { useRef, useEffect } from 'react';
@@ -41,14 +42,14 @@ export function FixTerminal({ lines, expanded, onToggle }: FixTerminalProps) {
     alignItems: 'center',
     gap: '4px',
     padding: '3px 6px',
-    fontSize: '10px',
+    fontSize: '11px',
     fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
     color: theme.textMuted,
     cursor: 'pointer',
     userSelect: 'none',
-    borderRadius: expanded ? '4px 4px 0 0' : '4px',
-    background: theme.isDark ? '#1a1a2e' : '#1e1e1e',
-    border: `1px solid ${theme.isDark ? '#2a2a3e' : '#333'}`,
+    borderRadius: expanded ? '6px 6px 0 0' : '6px',
+    background: theme.bgSubtle,
+    border: `1px solid ${theme.border}`,
     borderBottom: expanded ? 'none' : undefined,
   };
 
@@ -60,16 +61,14 @@ export function FixTerminal({ lines, expanded, onToggle }: FixTerminalProps) {
     fontSize: '11px',
     lineHeight: '1.5',
     fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-    background: theme.isDark ? '#1a1a2e' : '#1e1e1e',
-    color: theme.isDark ? '#d4d4d8' : '#d4d4d4',
-    borderRadius: '0 0 4px 4px',
-    border: `1px solid ${theme.isDark ? '#2a2a3e' : '#333'}`,
+    background: theme.bgSubtle,
+    color: theme.text,
+    borderRadius: '0 0 6px 6px',
+    border: `1px solid ${theme.border}`,
     borderTop: 'none',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-all',
   };
-
-  const stderrColor = theme.isDark ? '#f87171' : '#ef9a9a';
 
   const Chevron = expanded ? ChevronDown : ChevronRight;
 
@@ -86,7 +85,7 @@ export function FixTerminal({ lines, expanded, onToggle }: FixTerminalProps) {
             <div
               key={i}
               style={{
-                color: line.stream === 'stderr' ? stderrColor : undefined,
+                color: line.stream === 'stderr' ? theme.error : undefined,
                 minHeight: '1em',
               }}
             >

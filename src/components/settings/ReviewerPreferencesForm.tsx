@@ -342,7 +342,7 @@ const smallBtnStyle: React.CSSProperties = {
   padding: '3px 8px',
   fontSize: '11px',
   border: '1px solid #d1d5db',
-  borderRadius: '4px',
+  borderRadius: '6px',
   background: '#fff',
   color: '#374151',
   cursor: 'pointer',

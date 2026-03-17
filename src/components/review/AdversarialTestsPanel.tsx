@@ -122,7 +122,7 @@ function TestItem({ test, result }: { test: PropertyTest; result?: PropertyTestR
           style={{
             fontSize: '11px',
             padding: '1px 5px',
-            borderRadius: '3px',
+            borderRadius: '6px',
             background: config.bg,
             color: config.color,
             fontWeight: 600,
@@ -146,7 +146,7 @@ function TestItem({ test, result }: { test: PropertyTest; result?: PropertyTestR
               marginTop: '4px',
               padding: '4px 8px',
               background: theme.errorBg,
-              borderRadius: '3px',
+              borderRadius: '6px',
               fontSize: '11px',
               fontFamily: 'monospace',
               color: theme.error,
@@ -192,7 +192,7 @@ function StatPill({ label, count, color, bg }: {
     <span style={{
       fontSize: '10px',
       padding: '1px 5px',
-      borderRadius: '3px',
+      borderRadius: '6px',
       background: bg,
       color,
       fontWeight: 600,

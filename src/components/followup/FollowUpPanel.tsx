@@ -310,7 +310,7 @@ function FollowUpFixButton({ change, commentId, changeIndex, theme }: {
 
   const btnBase: React.CSSProperties = {
     padding: '2px 8px',
-    borderRadius: '3px',
+    borderRadius: '6px',
     fontSize: '11px',
     cursor: 'pointer',
     border: `1px solid ${theme.border}`,
@@ -354,7 +354,7 @@ function FollowUpFixButton({ change, commentId, changeIndex, theme }: {
     if (fixJob.status === 'failed') {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
-          <span style={{ fontSize: '11px', color: theme.isDark ? '#fca5a5' : '#991b1b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ fontSize: '11px', color: theme.error, display: 'flex', alignItems: 'center', gap: '4px' }}>
             <X size={12} />
             {fixJob.error || 'Fix failed'}
           </span>
@@ -406,9 +406,9 @@ function FollowUpFixButton({ change, commentId, changeIndex, theme }: {
           display: 'flex',
           alignItems: 'center',
           gap: '3px',
-          background: theme.isDark ? '#1e1b4b' : '#eef2ff',
-          color: theme.isDark ? '#a5b4fc' : '#4338ca',
-          borderColor: theme.isDark ? '#312e81' : '#a5b4fc',
+          background: theme.infoBg,
+          color: theme.info,
+          borderColor: theme.infoBorder,
         }}
         onClick={handleFix}
         title="Auto-fix: clone, apply, test, and push this change in a sandbox"
@@ -455,7 +455,7 @@ function ReplyDraft({ draft, theme }: { draft: string; theme: OttoTheme }) {
           justifyContent: 'center',
           width: '26px',
           height: '26px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           border: `1px solid ${theme.border}`,
           background: theme.bg,
           cursor: 'pointer',
@@ -503,7 +503,7 @@ function buildStyles(theme: OttoTheme) {
   return {
     container: {
       borderLeft: `3px solid ${theme.brand}`,
-      background: theme.isDark ? '#1a1f2e' : '#f8faff',
+      background: theme.bgInset,
       borderRadius: '0 6px 6px 0',
       marginTop: '8px',
       marginBottom: '8px',
@@ -550,7 +550,7 @@ function buildStyles(theme: OttoTheme) {
       justifyContent: 'center',
       width: '24px',
       height: '24px',
-      borderRadius: '4px',
+      borderRadius: '6px',
       border: 'none',
       background: 'transparent',
       cursor: 'pointer',

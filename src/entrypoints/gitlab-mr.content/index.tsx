@@ -46,6 +46,11 @@ import { usePresenceStore } from '@/services/presence/presence-store';
 import { startViewportTracker } from '@/services/presence/viewport-tracker';
 import { startPresenceInjection } from '@/services/presence/presence-injector';
 import { DEFAULT_HUE, generateCssVariables, getInjectorColors, getLogoColor, hslToHex } from '@/lib/palette';
+import { useInquiryStore } from '@/services/inquiry/inquiry-store';
+import { startInquirySelection } from '@/services/inquiry/selection-manager';
+import { startTeamInquiryInjection } from '@/services/inquiry/team-inquiry-injector';
+import { startLocalInquiryInjection } from '@/services/inquiry/local-inquiry-injector';
+import { tryLoadCachedInquiries } from '@/services/inquiry/inquiry-stream-dispatcher';
 
 // Presence cleanup functions — stored at module level so the SPA navigation
 // handler can tear them down. ctx.signal only fires on content script
@@ -292,6 +297,7 @@ export default defineContentScript({
         disconnectMrQueuePort();
         useReviewStore.getState().reset();
         useChatStore.getState().reset();
+        useInquiryStore.getState().reset();
 
         const newContext = await buildMrContext(false);
         if (newContext) {
@@ -356,6 +362,25 @@ async function initDiffsFeatures(
   // Related files sidebar — only start if relatedFiles is enabled
   if (enabled?.relatedFiles !== false) {
     startRelatedFilesSidebar(isDarkMode, ctx.signal);
+  }
+
+  // Line inquiry — click+drag selection on diff line numbers.
+  // Only start if the inquiry feature is enabled.
+  if (enabled?.inquiry !== false) {
+    startInquirySelection(isDarkMode, brandHue, ctx.signal);
+
+    // Load cached inquiries for this MR
+    tryLoadCachedInquiries(mrContext.projectPath, mrContext.mrIid);
+
+    // Local inquiry gutter dots — shows indicators for cached/completed inquiries
+    startLocalInquiryInjection(isDarkMode, brandHue, ctx.signal);
+
+    // Team inquiry gutter dots (Botto only)
+    const inquirySettings = (globalThis as any).__ottoSettings as OttoSettings | undefined;
+    const bottoForInquiry = inquirySettings ? getBottoClient(inquirySettings) : null;
+    if (bottoForInquiry?.isConnected()) {
+      startTeamInquiryInjection(isDarkMode, brandHue, ctx.signal);
+    }
   }
 
   // Presence: file-level viewer avatars + viewport tracking.

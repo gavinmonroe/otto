@@ -163,7 +163,7 @@ function styles(theme: OttoTheme) {
       display: 'inline-flex',
       alignItems: 'center',
       padding: '2px 8px',
-      borderRadius: '4px',
+      borderRadius: '6px',
       border: `1px solid ${theme.borderSubtle}`,
       background: 'transparent',
       color: theme.textSecondary,

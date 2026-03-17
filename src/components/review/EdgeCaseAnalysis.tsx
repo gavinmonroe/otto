@@ -31,16 +31,16 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
 
   const severityColors: Record<string, { bg: string; text: string }> = {
     critical: {
-      bg: theme.isDark ? '#450a0a' : '#fecaca',
-      text: theme.isDark ? '#fca5a5' : '#991b1b',
+      bg: theme.errorBg,
+      text: theme.error,
     },
     moderate: {
-      bg: theme.isDark ? '#451a03' : '#fef3c7',
-      text: theme.isDark ? '#fbbf24' : '#92400e',
+      bg: theme.warningBg,
+      text: theme.warning,
     },
     minor: {
-      bg: theme.isDark ? '#1e3a5f' : '#dbeafe',
-      text: theme.isDark ? '#93c5fd' : '#1e40af',
+      bg: theme.infoBg,
+      text: theme.info,
     },
   };
 
@@ -62,7 +62,7 @@ function EdgeCaseItem({ edgeCase }: { edgeCase: EdgeCase }) {
         <span style={{
           fontSize: '11px',
           padding: '1px 6px',
-          borderRadius: '3px',
+          borderRadius: '6px',
           background: colors.bg,
           color: colors.text,
           fontWeight: 600,

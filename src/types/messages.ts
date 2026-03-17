@@ -40,6 +40,7 @@ import type {
 } from './gitlab';
 import type { FollowUpAnalysis, ThreadContext } from './followup';
 import type { ChatMessage, SuggestedQuestion } from './chat';
+import type { InquiryContext, InquirySlide } from './inquiry';
 import type { TicketInfo } from './ticket';
 import type { TicketProvider } from './ticket';
 import type { MrPreviewData } from './mr-preview';
@@ -302,6 +303,13 @@ export type StreamRequest =
       history: ChatMessage[];
       reviewContext: ChatReviewContext;
     };
+  }
+  | {
+    type: 'STREAM_INQUIRY';
+    payload: {
+      inquiryContext: InquiryContext;
+      question: string;
+    };
   };
 
 /**
@@ -344,4 +352,8 @@ export type StreamChunk =
   | { type: 'STREAM_TRUST_COMPLETE'; payload: { trust: TrustAssessment } }
   | { type: 'STREAM_CI_EXECUTION_COMPLETE'; payload: { result: CiExecutionResult } }
   // Queue stream chunks
-  | { type: 'STREAM_REVIEW_PAUSED'; payload: { reason: string } };
+  | { type: 'STREAM_REVIEW_PAUSED'; payload: { reason: string } }
+  // Inquiry stream chunks
+  | { type: 'STREAM_INQUIRY_DELTA'; payload: { content: string } }
+  | { type: 'STREAM_INQUIRY_COMPLETE'; payload: { content: string } }
+  | { type: 'STREAM_INQUIRY_ERROR'; payload: { error: string } };

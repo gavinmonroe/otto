@@ -25,6 +25,7 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   adversarialTests: 'Adversarial Tests',
   contracts: 'Contract Inference',
   behavioralDelta: 'Behavioral Delta',
+  inquiry: 'Line Inquiry',
 };
 
 export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {

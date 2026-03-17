@@ -272,7 +272,7 @@ export function GuidedReviewPanel({ hostId, projectId, mrIid }: Props) {
       {/* Progress bar */}
       <div style={{
         height: '2px',
-        background: theme.isDark ? '#374151' : '#e5e7eb',
+        background: theme.bgMuted,
       }}>
         <div style={{
           height: '100%',
@@ -330,7 +330,7 @@ function SlideTypeIndicator({ slide, theme }: { slide: ReviewSlide | null; theme
     <span style={{
       fontSize: '11px',
       padding: '2px 8px',
-      borderRadius: '4px',
+      borderRadius: '6px',
       background: theme.bgMuted,
       color: theme.textSecondary,
       fontWeight: 500,

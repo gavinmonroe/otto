@@ -143,7 +143,7 @@ function BehaviorItem({ entry, icon, color, bg, theme }: {
       padding: '6px 8px',
       marginBottom: '4px',
       background: bg,
-      borderRadius: '4px',
+      borderRadius: '6px',
       borderLeft: `3px solid ${color}`,
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
@@ -208,7 +208,7 @@ function BehaviorItem({ entry, icon, color, bg, theme }: {
               marginTop: '4px',
               padding: '4px 8px',
               background: theme.bgInset,
-              borderRadius: '3px',
+              borderRadius: '6px',
               fontSize: '11px',
             }}>
               <div style={{ color: theme.textSecondary }}>

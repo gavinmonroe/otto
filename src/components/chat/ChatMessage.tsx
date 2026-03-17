@@ -102,7 +102,7 @@ function UserBlock({ content }: { content: string }) {
       padding: '8px 14px',
       borderBottom: `1px solid ${theme.borderSubtle}`,
       borderLeft: `3px solid ${theme.brand}`,
-      background: theme.isDark ? 'rgba(64, 196, 245, 0.04)' : 'rgba(12, 147, 231, 0.03)',
+      background: theme.bgInset,
     }}>
       <div style={{
         fontSize: '11px',
@@ -196,12 +196,12 @@ function buildChatComponents(t: OttoTheme): Components {
       return (
         <code style={{
           padding: '1px 5px',
-          borderRadius: '3px',
+          borderRadius: '4px',
           fontSize: '0.9em',
           fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-          background: t.isDark ? '#1e293b' : '#f1f5f9',
-          color: t.isDark ? '#e2e8f0' : '#334155',
-          border: `1px solid ${t.isDark ? '#334155' : '#e2e8f0'}`,
+          background: t.bgMuted,
+          color: t.text,
+          border: `1px solid ${t.border}`,
         }}>
           {children}
         </code>
@@ -212,8 +212,8 @@ function buildChatComponents(t: OttoTheme): Components {
         margin: '4px 0',
         padding: '10px 12px',
         borderRadius: '6px',
-        background: t.isDark ? '#0f172a' : '#f8fafc',
-        border: `1px solid ${t.isDark ? '#1e293b' : '#e2e8f0'}`,
+        background: t.bgSubtle,
+        border: `1px solid ${t.border}`,
         overflow: 'auto',
         maxHeight: '300px',
         fontSize: '12px',
@@ -243,8 +243,8 @@ function buildChatComponents(t: OttoTheme): Components {
         padding: '4px 12px',
         borderLeft: `3px solid ${t.brand}`,
         color: t.textSecondary,
-        background: t.isDark ? '#1e293b' : '#f8fafc',
-        borderRadius: '0 4px 4px 0',
+        background: t.bgSubtle,
+        borderRadius: '0 6px 6px 0',
       }}>
         {children}
       </blockquote>

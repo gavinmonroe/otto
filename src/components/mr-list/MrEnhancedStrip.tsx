@@ -144,7 +144,7 @@ export function MrEnhancedStrip({
               style={{
                 background: 'none',
                 border: `1px solid ${theme.borderSubtle}`,
-                borderRadius: '3px',
+                borderRadius: '6px',
                 color: theme.warning,
                 fontSize: '9px',
                 fontWeight: 600,
@@ -168,12 +168,18 @@ export function MrEnhancedStrip({
 // ---------------------------------------------------------------------------
 
 function StatePill({ state, theme }: { state: MrPreviewData['state']; theme: OttoTheme }) {
-  const config = STATE_COLORS[state] ?? STATE_COLORS.opened;
+  const configs: Record<string, { bg: string; color: string }> = {
+    opened: { bg: theme.successBg, color: theme.success },
+    merged: { bg: theme.infoBg, color: theme.info },
+    closed: { bg: theme.errorBg, color: theme.error },
+    locked: { bg: theme.bgMuted, color: theme.textSecondary },
+  };
+  const config = configs[state] ?? configs.opened;
   return (
     <span style={{
       ...pillStyle,
-      background: theme.isDark ? config.bgDark : config.bg,
-      color: theme.isDark ? config.colorDark : config.color,
+      background: config.bg,
+      color: config.color,
     }}>
       {STATE_LABELS[state] ?? state}
     </span>
@@ -205,12 +211,17 @@ function LinesPill({ added, removed, theme }: { added: number; removed: number; 
 }
 
 function RiskPill({ level, theme }: { level: 'low' | 'medium' | 'high'; theme: OttoTheme }) {
-  const config = RISK_COLORS[level];
+  const configs: Record<string, { bg: string; color: string }> = {
+    low: { bg: theme.successBg, color: theme.success },
+    medium: { bg: theme.warningBg, color: theme.warning },
+    high: { bg: theme.errorBg, color: theme.error },
+  };
+  const config = configs[level] ?? configs.low;
   return (
     <span style={{
       ...pillStyle,
-      background: theme.isDark ? config.bgDark : config.bg,
-      color: theme.isDark ? config.colorDark : config.color,
+      background: config.bg,
+      color: config.color,
     }}>
       {level} risk
     </span>
@@ -272,7 +283,7 @@ function QueueActionButton({
         width: '22px',
         height: '22px',
         border: `1px solid ${theme.borderSubtle}`,
-        borderRadius: '4px',
+        borderRadius: '6px',
         background: theme.bgSubtle,
         color,
         cursor: 'pointer',
@@ -350,7 +361,7 @@ const RISK_COLORS: Record<string, { bg: string; color: string; bgDark: string; c
 const pillStyle: React.CSSProperties = {
   display: 'inline-block',
   padding: '1px 6px',
-  borderRadius: '3px',
+  borderRadius: '6px',
   fontSize: '10px',
   fontWeight: 600,
   whiteSpace: 'nowrap',

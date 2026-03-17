@@ -32,7 +32,7 @@ export function ContractsPanel({ data }: ContractsPanelProps) {
       <div style={{ display: 'flex', gap: '4px', marginBottom: '8px', flexWrap: 'wrap' }}>
         {data.totalVerified > 0 && (
           <span style={{
-            fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
+            fontSize: '10px', padding: '1px 5px', borderRadius: '6px',
             background: theme.successBg, color: theme.success, fontWeight: 600,
           }}>
             {data.totalVerified} verified
@@ -40,7 +40,7 @@ export function ContractsPanel({ data }: ContractsPanelProps) {
         )}
         {data.totalViolations > 0 && (
           <span style={{
-            fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
+            fontSize: '10px', padding: '1px 5px', borderRadius: '6px',
             background: theme.errorBg, color: theme.error, fontWeight: 600,
           }}>
             {data.totalViolations} violation{data.totalViolations !== 1 ? 's' : ''} possible
@@ -48,7 +48,7 @@ export function ContractsPanel({ data }: ContractsPanelProps) {
         )}
         {data.totalUnknown > 0 && (
           <span style={{
-            fontSize: '10px', padding: '1px 5px', borderRadius: '3px',
+            fontSize: '10px', padding: '1px 5px', borderRadius: '6px',
             background: theme.warningBg, color: theme.warning, fontWeight: 600,
           }}>
             {data.totalUnknown} unknown
@@ -89,7 +89,7 @@ function ContractItem({ contract }: { contract: FunctionContract }) {
       padding: '8px',
       marginBottom: '6px',
       background: config.bg,
-      borderRadius: '4px',
+      borderRadius: '6px',
       borderLeft: `3px solid ${config.borderColor}`,
     }}>
       <button
@@ -143,7 +143,7 @@ function ContractItem({ contract }: { contract: FunctionContract }) {
               marginTop: '6px',
               padding: '4px 8px',
               background: theme.bgInset,
-              borderRadius: '3px',
+              borderRadius: '6px',
               fontSize: '11px',
             }}>
               <span style={{ fontWeight: 600, color: config.color }}>Violation path: </span>
@@ -171,8 +171,8 @@ function ContractSection({ label, statements, theme }: {
 
   const labelColors: Record<string, string> = {
     PRE: theme.info,
-    POST: theme.isDark ? '#a5b4fc' : '#4f46e5',
-    INV: theme.isDark ? '#c4b5fd' : '#7c3aed',
+    POST: theme.info,
+    INV: theme.brand,
   };
 
   return (

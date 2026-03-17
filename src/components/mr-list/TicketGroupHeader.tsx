@@ -133,7 +133,7 @@ function styles(theme: OttoTheme) {
     statusPill: {
       display: 'inline-block',
       padding: '0px 5px',
-      borderRadius: '3px',
+      borderRadius: '6px',
       fontSize: '9px',
       fontWeight: 600,
       whiteSpace: 'nowrap' as const,

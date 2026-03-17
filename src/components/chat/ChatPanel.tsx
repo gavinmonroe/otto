@@ -184,7 +184,7 @@ export function ChatPanel() {
       {focusedComment && (
         <div style={{
           padding: '6px 14px',
-          background: theme.isDark ? '#1e3a5f' : '#eff6ff',
+          background: theme.infoBg,
           borderBottom: `1px solid ${theme.borderSubtle}`,
           fontSize: '12px',
           color: theme.textSecondary,
@@ -379,7 +379,7 @@ function buildStyles(t: OttoTheme) {
 
     iconButton: {
       padding: '4px',
-      borderRadius: '4px',
+      borderRadius: '6px',
       background: 'transparent',
       border: 'none',
       color: t.textSecondary,

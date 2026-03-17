@@ -95,7 +95,8 @@ export function FileReviewFooter({ filePath }: FileReviewFooterProps) {
           padding: '5px 14px',
           fontSize: '11px',
           color: theme.warning,
-          background: theme.isDark ? '#451a0320' : '#fffbeb80',
+          background: theme.warningBg,
+          opacity: 0.8,
           borderBottom: `1px solid ${theme.borderSubtle}`,
         }}>
           <AlertTriangle size={12} style={{ flexShrink: 0 }} />
@@ -151,10 +152,10 @@ function CommentRow({
   const s = buildStyles(theme);
 
   const severityConfig = {
-    critical: { icon: AlertCircle, color: theme.isDark ? '#fca5a5' : '#dc2626', bg: theme.isDark ? '#450a0a' : '#fef2f2' },
-    warning: { icon: AlertTriangle, color: theme.isDark ? '#fbbf24' : '#d97706', bg: theme.isDark ? '#451a03' : '#fffbeb' },
-    suggestion: { icon: Lightbulb, color: theme.isDark ? '#93c5fd' : '#2563eb', bg: theme.isDark ? '#1e3a5f' : '#eff6ff' },
-    info: { icon: Info, color: theme.isDark ? '#a5b4fc' : '#4f46e5', bg: theme.isDark ? '#1e1b4b' : '#eef2ff' },
+    critical: { icon: AlertCircle, color: theme.error, bg: theme.errorBg },
+    warning: { icon: AlertTriangle, color: theme.warning, bg: theme.warningBg },
+    suggestion: { icon: Lightbulb, color: theme.info, bg: theme.infoBg },
+    info: { icon: Info, color: theme.info, bg: theme.infoBg },
   };
 
   const config = severityConfig[comment.severity] || severityConfig.info;
@@ -180,7 +181,7 @@ function CommentRow({
         <span style={{
           fontSize: '11px',
           padding: '1px 6px',
-          borderRadius: '3px',
+          borderRadius: '6px',
           background: config.bg,
           color: config.color,
           fontWeight: 600,
@@ -241,9 +242,9 @@ function CommentRow({
 
 function RiskBadge({ riskLevel, theme }: { riskLevel: string; theme: OttoTheme }) {
   const config: Record<string, { bg: string; color: string }> = {
-    high: { bg: theme.isDark ? '#450a0a' : '#fef2f2', color: theme.isDark ? '#fca5a5' : '#dc2626' },
-    medium: { bg: theme.isDark ? '#451a03' : '#fffbeb', color: theme.isDark ? '#fbbf24' : '#d97706' },
-    low: { bg: theme.isDark ? '#064e3b' : '#f0fdf4', color: theme.isDark ? '#4ade80' : '#16a34a' },
+    high: { bg: theme.errorBg, color: theme.error },
+    medium: { bg: theme.warningBg, color: theme.warning },
+    low: { bg: theme.successBg, color: theme.success },
   };
   const c = config[riskLevel] || config.low;
 
@@ -251,7 +252,7 @@ function RiskBadge({ riskLevel, theme }: { riskLevel: string; theme: OttoTheme }
     <span style={{
       fontSize: '11px',
       padding: '1px 6px',
-      borderRadius: '3px',
+      borderRadius: '6px',
       background: c.bg,
       color: c.color,
       fontWeight: 600,

@@ -51,6 +51,7 @@ import { buildFollowUpPrompt } from './prompts/followup';
 import type { FollowUpInput } from './prompts/followup';
 import type { FollowUpAnalysis, FollowUpAction } from '@/types/followup';
 import { buildChatPrompt } from './prompts/chat';
+import { buildInquiryPrompt } from './prompts/inquiry';
 import { buildAcValidationPrompt } from './prompts/ac-validation';
 import type { AcValidationInput } from './prompts/ac-validation';
 import { buildAdversarialTestPrompt } from './prompts/adversarial-tests';
@@ -61,6 +62,7 @@ import { buildBehavioralDeltaPrompt } from './prompts/behavioral-delta';
 import type { BehavioralDeltaInput } from './prompts/behavioral-delta';
 import type { ChatReviewContext } from '@/types/messages';
 import type { ChatMessage as UiChatMessage, SuggestedQuestion } from '@/types/chat';
+import type { InquiryContext } from '@/types/inquiry';
 import { generateId } from '@/lib/utils';
 import {
   REPO_EXPLORER_TOOLS,
@@ -1029,4 +1031,57 @@ export async function generateBehavioralDelta(
       summary: delta.summary || '',
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Line Inquiry
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a response for a line inquiry question.
+ * Streams content deltas for real-time display.
+ *
+ * Unlike chat, inquiry returns plain markdown with no suggested questions
+ * or [[filePath:line]] references — the response is already anchored to
+ * a specific line range.
+ */
+export async function generateInquiryResponse(
+  aiConfig: AiConfig,
+  context: InquiryContext,
+  question: string,
+  onDelta?: (content: string) => void,
+  signal?: AbortSignal,
+): Promise<Result<string>> {
+  const messages = buildInquiryPrompt(
+    context,
+    question,
+    getCustomPrompt(aiConfig, 'inquiry'),
+  );
+  const config = getClientConfig(aiConfig);
+  const model = getModel(aiConfig, 'inquiry');
+  const temperature = getTemperature(aiConfig, 'inquiry');
+  const max_tokens = getMaxTokens(aiConfig, 'inquiry');
+
+  let fullText = '';
+
+  if (onDelta) {
+    try {
+      const stream = chatCompletionStream(config, { model, messages, temperature, max_tokens }, signal);
+      for await (const chunk of stream) {
+        fullText += chunk;
+        onDelta(chunk);
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        return { ok: false, error: 'Inquiry cancelled' };
+      }
+      return { ok: false, error: error instanceof Error ? error.message : 'Inquiry stream failed' };
+    }
+  } else {
+    const result = await chatCompletion(config, { model, messages, temperature, max_tokens });
+    if (!result.ok) return result;
+    fullText = result.data.choices[0]?.message?.content || '';
+  }
+
+  return { ok: true, data: fullText };
 }

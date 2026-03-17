@@ -46,10 +46,13 @@ export type OttoTheme = {
   errorBorder: string;
   success: string;
   successBg: string;
+  successBorder: string;
   warning: string;
   warningBg: string;
+  warningBorder: string;
   info: string;
   infoBg: string;
+  infoBorder: string;
   // Interactive
   btnPrimaryBg: string;
   btnPrimaryText: string;

@@ -205,10 +205,10 @@ export function ReviewQueuePanel() {
           borderRadius: '9px',
           padding: '0 5px',
           background: reviewedCount === totalCount
-            ? (theme.isDark ? '#065f46' : '#d1fae5')
-            : (theme.isDark ? '#374151' : '#e5e7eb'),
+            ? theme.successBg
+            : theme.bgMuted,
           color: reviewedCount === totalCount
-            ? (theme.isDark ? '#6ee7b7' : '#059669')
+            ? theme.success
             : theme.textSecondary,
           fontWeight: 600,
         }}>
@@ -222,7 +222,7 @@ export function ReviewQueuePanel() {
           margin: '0 10px 6px 28px',
           height: '2px',
           borderRadius: '1px',
-          background: theme.isDark ? '#374151' : '#e5e7eb',
+          background: theme.bgMuted,
           overflow: 'hidden',
         }}>
           <div style={{
@@ -262,7 +262,7 @@ function QueueFileRow({ item, theme }: { item: FileQueueItem; theme: OttoTheme }
         gap: '8px',
         width: '100%',
         padding: '5px 10px 5px 24px',
-        background: hovered ? (theme.isDark ? '#2d333b' : '#f3f4f6') : 'transparent',
+        background: hovered ? theme.bgMuted : 'transparent',
         border: 'none',
         borderBottom: `1px solid ${theme.borderSubtle}`,
         cursor: 'pointer',
@@ -287,7 +287,7 @@ function QueueFileRow({ item, theme }: { item: FileQueueItem; theme: OttoTheme }
       </svg>
 
       {/* Risk badge */}
-      <RiskBadge riskLevel={item.riskLevel} isDark={theme.isDark} />
+      <RiskBadge riskLevel={item.riskLevel} theme={theme} />
 
       {/* File name + dir */}
       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -322,13 +322,13 @@ function QueueFileRow({ item, theme }: { item: FileQueueItem; theme: OttoTheme }
         flexShrink: 0,
       }}>
         {item.criticalCount > 0 && (
-          <SeverityPill count={item.criticalCount} color="#dc2626" bgColor={theme.isDark ? '#450a0a' : '#fef2f2'} />
+          <SeverityPill count={item.criticalCount} color={theme.error} bgColor={theme.errorBg} />
         )}
         {item.warningCount > 0 && (
-          <SeverityPill count={item.warningCount} color="#d97706" bgColor={theme.isDark ? '#451a03' : '#fffbeb'} />
+          <SeverityPill count={item.warningCount} color={theme.warning} bgColor={theme.warningBg} />
         )}
         {item.suggestionCount > 0 && (
-          <SeverityPill count={item.suggestionCount} color="#2563eb" bgColor={theme.isDark ? '#1e1b4b' : '#eff6ff'} />
+          <SeverityPill count={item.suggestionCount} color={theme.info} bgColor={theme.infoBg} />
         )}
       </div>
 
@@ -342,25 +342,25 @@ function QueueFileRow({ item, theme }: { item: FileQueueItem; theme: OttoTheme }
   );
 }
 
-function RiskBadge({ riskLevel, isDark }: { riskLevel: 'low' | 'medium' | 'high'; isDark: boolean }) {
+function RiskBadge({ riskLevel, theme }: { riskLevel: 'low' | 'medium' | 'high'; theme: OttoTheme }) {
   const config = {
     high: {
       label: 'H',
-      color: isDark ? '#fca5a5' : '#dc2626',
-      bg: isDark ? '#450a0a' : '#fef2f2',
-      border: isDark ? '#7f1d1d' : '#fca5a5',
+      color: theme.error,
+      bg: theme.errorBg,
+      border: theme.errorBorder,
     },
     medium: {
       label: 'M',
-      color: isDark ? '#fcd34d' : '#d97706',
-      bg: isDark ? '#451a03' : '#fffbeb',
-      border: isDark ? '#78350f' : '#fcd34d',
+      color: theme.warning,
+      bg: theme.warningBg,
+      border: theme.warningBorder,
     },
     low: {
       label: 'L',
-      color: isDark ? '#86efac' : '#16a34a',
-      bg: isDark ? '#052e16' : '#f0fdf4',
-      border: isDark ? '#14532d' : '#86efac',
+      color: theme.success,
+      bg: theme.successBg,
+      border: theme.successBorder,
     },
   };
   const c = config[riskLevel];
@@ -374,7 +374,7 @@ function RiskBadge({ riskLevel, isDark }: { riskLevel: 'low' | 'medium' | 'high'
       height: '15px',
       fontSize: '9px',
       fontWeight: 700,
-      borderRadius: '3px',
+      borderRadius: '6px',
       background: c.bg,
       color: c.color,
       border: `1px solid ${c.border}`,
@@ -391,7 +391,7 @@ function SeverityPill({ count, color, bgColor }: { count: number; color: string;
       fontSize: '10px',
       fontWeight: 600,
       padding: '0 4px',
-      borderRadius: '3px',
+      borderRadius: '6px',
       background: bgColor,
       color,
       lineHeight: '16px',

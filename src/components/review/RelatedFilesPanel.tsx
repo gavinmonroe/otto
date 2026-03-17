@@ -41,9 +41,9 @@ function RelatedFileItem({ file }: { file: RelatedFile }) {
         <span style={{
           fontSize: '11px',
           padding: '1px 6px',
-          borderRadius: '3px',
-          background: theme.isDark ? '#1e3a5f' : '#e0e7ff',
-          color: theme.isDark ? '#93c5fd' : '#3730a3',
+          borderRadius: '6px',
+          background: theme.infoBg,
+          color: theme.info,
           fontWeight: 500,
           flexShrink: 0,
         }}>

@@ -232,7 +232,7 @@ function CommentSlideContent({
           alignItems: 'center',
           gap: '4px',
           padding: '2px 8px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
           background: colors.bg,
@@ -244,7 +244,7 @@ function CommentSlideContent({
         <span style={{
           fontSize: '11px',
           padding: '2px 6px',
-          borderRadius: '3px',
+          borderRadius: '6px',
           background: theme.bgMuted,
           color: theme.textSecondary,
           fontWeight: 500,
@@ -366,7 +366,7 @@ function EdgeCaseSlideContent({
           alignItems: 'center',
           gap: '4px',
           padding: '2px 8px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
           background: severityConfig.bg,
@@ -378,7 +378,7 @@ function EdgeCaseSlideContent({
         <span style={{
           fontSize: '11px',
           padding: '2px 6px',
-          borderRadius: '3px',
+          borderRadius: '6px',
           background: theme.bgMuted,
           color: theme.textSecondary,
           fontWeight: 500,
@@ -452,11 +452,11 @@ function ThreadSlideContent({
           alignItems: 'center',
           gap: '4px',
           padding: '2px 8px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
-          background: theme.isDark ? '#451a03' : '#fffbeb',
-          color: theme.isDark ? '#fbbf24' : '#d97706',
+          background: theme.warningBg,
+          color: theme.warning,
         }}>
           <MessageSquare size={12} />
           Unresolved Thread
@@ -509,7 +509,7 @@ function NoteCard({ note, theme }: { note: GitLabNote; theme: OttoTheme }) {
           <span style={{
             fontSize: '10px',
             padding: '1px 5px',
-            borderRadius: '3px',
+            borderRadius: '6px',
             background: theme.successBg,
             color: theme.success,
             fontWeight: 600,
@@ -683,7 +683,7 @@ function RelatedFileRow({
               alignItems: 'center',
               gap: '2px',
               padding: '1px 5px',
-              borderRadius: '3px',
+              borderRadius: '6px',
               border: `1px solid ${theme.borderSubtle}`,
               background: showContent ? theme.bgMuted : 'transparent',
               color: theme.textMuted,
@@ -870,7 +870,7 @@ function RelationshipBadge({ relationship, theme }: { relationship: string; them
     <span style={{
       fontSize: '10px',
       padding: '1px 5px',
-      borderRadius: '3px',
+      borderRadius: '6px',
       background: theme.bgMuted,
       color: theme.textSecondary,
       fontWeight: 500,
@@ -889,21 +889,21 @@ function RiskBadge({ riskLevel, theme }: { riskLevel: 'low' | 'medium' | 'high';
   const config = {
     high: {
       label: 'HIGH',
-      color: theme.isDark ? '#fca5a5' : '#dc2626',
-      bg: theme.isDark ? '#450a0a' : '#fef2f2',
-      border: theme.isDark ? '#7f1d1d' : '#fca5a5',
+      color: theme.error,
+      bg: theme.errorBg,
+      border: theme.errorBorder,
     },
     medium: {
       label: 'MED',
-      color: theme.isDark ? '#fcd34d' : '#d97706',
-      bg: theme.isDark ? '#451a03' : '#fffbeb',
-      border: theme.isDark ? '#78350f' : '#fcd34d',
+      color: theme.warning,
+      bg: theme.warningBg,
+      border: theme.warningBorder,
     },
     low: {
       label: 'LOW',
-      color: theme.isDark ? '#86efac' : '#16a34a',
-      bg: theme.isDark ? '#052e16' : '#f0fdf4',
-      border: theme.isDark ? '#14532d' : '#86efac',
+      color: theme.success,
+      bg: theme.successBg,
+      border: theme.successBorder,
     },
   };
   const c = config[riskLevel];
@@ -913,7 +913,7 @@ function RiskBadge({ riskLevel, theme }: { riskLevel: 'low' | 'medium' | 'high';
       fontSize: '10px',
       fontWeight: 600,
       padding: '1px 6px',
-      borderRadius: '3px',
+      borderRadius: '6px',
       background: c.bg,
       color: c.color,
       border: `1px solid ${c.border}`,
@@ -945,18 +945,18 @@ const SEVERITY_ICONS: Record<string, typeof AlertCircle> = {
 
 function SEVERITY_COLORS(theme: OttoTheme): Record<string, { bg: string; text: string }> {
   return {
-    critical: { bg: theme.isDark ? '#450a0a' : '#fecaca', text: theme.isDark ? '#fca5a5' : '#991b1b' },
-    warning: { bg: theme.isDark ? '#451a03' : '#fef3c7', text: theme.isDark ? '#fbbf24' : '#92400e' },
-    suggestion: { bg: theme.isDark ? '#1e3a5f' : '#dbeafe', text: theme.isDark ? '#93c5fd' : '#1e40af' },
-    info: { bg: theme.isDark ? '#1e1b4b' : '#e0e7ff', text: theme.isDark ? '#a5b4fc' : '#3730a3' },
+    critical: { bg: theme.errorBg, text: theme.error },
+    warning: { bg: theme.warningBg, text: theme.warning },
+    suggestion: { bg: theme.infoBg, text: theme.info },
+    info: { bg: theme.infoBg, text: theme.info },
   };
 }
 
 function EDGE_SEVERITY_COLORS(theme: OttoTheme): Record<string, { bg: string; text: string }> {
   return {
-    critical: { bg: theme.isDark ? '#450a0a' : '#fecaca', text: theme.isDark ? '#fca5a5' : '#991b1b' },
-    moderate: { bg: theme.isDark ? '#451a03' : '#fef3c7', text: theme.isDark ? '#fbbf24' : '#92400e' },
-    minor: { bg: theme.isDark ? '#1e3a5f' : '#dbeafe', text: theme.isDark ? '#93c5fd' : '#1e40af' },
+    critical: { bg: theme.errorBg, text: theme.error },
+    moderate: { bg: theme.warningBg, text: theme.warning },
+    minor: { bg: theme.infoBg, text: theme.info },
   };
 }
 

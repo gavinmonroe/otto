@@ -83,7 +83,7 @@ const barStyle: React.CSSProperties = {
   display: 'flex',
   width: '100%',
   height: '6px',
-  borderRadius: '3px',
+  borderRadius: '6px',
   overflow: 'hidden',
   gap: '1px',
 };

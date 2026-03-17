@@ -118,7 +118,7 @@ export function BrandColorForm({ settings, onUpdate, isDark, optionsTheme: ot }:
             width: '100%',
             cursor: 'pointer',
             height: '6px',
-            borderRadius: '3px',
+            borderRadius: '6px',
             appearance: 'none',
             WebkitAppearance: 'none',
             background: 'linear-gradient(to right, hsl(0,90%,48%), hsl(30,90%,48%), hsl(60,90%,48%), hsl(90,90%,48%), hsl(120,90%,48%), hsl(150,90%,48%), hsl(180,90%,48%), hsl(210,90%,48%), hsl(240,90%,48%), hsl(270,90%,48%), hsl(300,90%,48%), hsl(330,90%,48%), hsl(360,90%,48%))',
@@ -140,7 +140,7 @@ export function BrandColorForm({ settings, onUpdate, isDark, optionsTheme: ot }:
             <div style={{
               width: '12px',
               height: '12px',
-              borderRadius: '3px',
+              borderRadius: '6px',
               background: color,
               border: `1px solid ${ot.border}`,
               flexShrink: 0,
@@ -195,7 +195,7 @@ function InlineCommentPreview({ theme: t, logoColor }: { theme: OttoTheme; logoC
         <span style={{
           marginLeft: 'auto',
           padding: '1px 6px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           fontSize: '10px',
           fontWeight: 600,
           background: t.warningBg,
@@ -209,7 +209,7 @@ function InlineCommentPreview({ theme: t, logoColor }: { theme: OttoTheme; logoC
         <p style={{ margin: '0 0 6px', color: t.text, lineHeight: '1.4' }}>
           Consider adding null check before accessing <code style={{
             padding: '1px 4px',
-            borderRadius: '3px',
+            borderRadius: '6px',
             background: t.bgMuted,
             fontSize: '11px',
             color: t.brandText,
@@ -219,18 +219,18 @@ function InlineCommentPreview({ theme: t, logoColor }: { theme: OttoTheme; logoC
         <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
           <span style={{
             padding: '2px 8px',
-            borderRadius: '4px',
+            borderRadius: '6px',
             fontSize: '10px',
             fontWeight: 500,
             background: t.successBg,
             color: t.success,
-            border: `1px solid ${t.isDark ? '#065f46' : '#86efac'}`,
+            border: `1px solid ${t.successBorder}`,
           }}>
             Accept
           </span>
           <span style={{
             padding: '2px 8px',
-            borderRadius: '4px',
+            borderRadius: '6px',
             fontSize: '10px',
             fontWeight: 500,
             background: t.errorBg,
@@ -241,7 +241,7 @@ function InlineCommentPreview({ theme: t, logoColor }: { theme: OttoTheme; logoC
           </span>
           <span style={{
             padding: '2px 8px',
-            borderRadius: '4px',
+            borderRadius: '6px',
             fontSize: '10px',
             fontWeight: 500,
             background: t.btnPrimaryBg,
@@ -284,7 +284,7 @@ function OverviewPreview({ theme: t, logoColor }: { theme: OttoTheme; logoColor:
         <span style={{
           marginLeft: 'auto',
           padding: '2px 8px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           fontSize: '10px',
           fontWeight: 600,
           background: t.btnPrimaryBg,

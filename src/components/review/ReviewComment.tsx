@@ -19,10 +19,10 @@ export function ReviewComment({ comment, onUpdateStatus }: ReviewCommentProps) {
   const isDismissed = comment.status === 'dismissed';
 
   const severityColors: Record<string, { bg: string; text: string }> = {
-    critical: { bg: theme.isDark ? '#450a0a' : '#fecaca', text: theme.isDark ? '#fca5a5' : '#991b1b' },
-    warning: { bg: theme.isDark ? '#451a03' : '#fef3c7', text: theme.isDark ? '#fbbf24' : '#92400e' },
-    suggestion: { bg: theme.isDark ? '#1e3a5f' : '#dbeafe', text: theme.isDark ? '#93c5fd' : '#1e40af' },
-    info: { bg: theme.isDark ? '#1e1b4b' : '#e0e7ff', text: theme.isDark ? '#a5b4fc' : '#3730a3' },
+    critical: { bg: theme.errorBg, text: theme.error },
+    warning: { bg: theme.warningBg, text: theme.warning },
+    suggestion: { bg: theme.infoBg, text: theme.info },
+    info: { bg: theme.infoBg, text: theme.info },
   };
 
   const colors = severityColors[comment.severity] || severityColors.info;
@@ -37,7 +37,7 @@ export function ReviewComment({ comment, onUpdateStatus }: ReviewCommentProps) {
         <span style={{
           display: 'inline-block',
           padding: '1px 6px',
-          borderRadius: '3px',
+          borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
           background: colors.bg,

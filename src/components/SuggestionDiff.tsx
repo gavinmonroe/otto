@@ -233,11 +233,11 @@ function buildStyles(theme: OttoTheme) {
     } as React.CSSProperties,
 
     headerRemoved: {
-      color: theme.isDark ? '#fca5a5' : '#82071e',
+      color: theme.error,
     } as React.CSSProperties,
 
     headerAdded: {
-      color: theme.isDark ? '#7ee787' : '#116329',
+      color: theme.success,
     } as React.CSSProperties,
 
     body: {

@@ -52,7 +52,7 @@ export function RelatedFilesSidebarPanel() {
           alignItems: 'center',
           justifyContent: 'center',
           borderRadius: '9px',
-          background: theme.isDark ? '#374151' : '#e5e7eb',
+          background: theme.bgMuted,
           color: theme.textSecondary,
           fontWeight: 600,
         }}>
@@ -170,7 +170,7 @@ function SidebarFileRow({
         gap: '8px',
         padding: '5px 10px 5px 24px',
         textDecoration: 'none',
-        background: hovered ? (theme.isDark ? '#2d333b' : '#f3f4f6') : 'transparent',
+        background: hovered ? theme.bgMuted : 'transparent',
         cursor: 'pointer',
         borderBottom: `1px solid ${theme.borderSubtle}`,
         transition: 'background 0.1s',
@@ -220,8 +220,8 @@ function SidebarFileRow({
       <span style={{
         fontSize: '10px',
         padding: '1px 5px',
-        borderRadius: '3px',
-        background: theme.isDark ? '#1f2937' : '#f3f4f6',
+        borderRadius: '6px',
+        background: theme.bgMuted,
         color: theme.textMuted,
         fontWeight: 500,
         flexShrink: 0,

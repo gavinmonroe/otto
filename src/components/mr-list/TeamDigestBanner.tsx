@@ -155,8 +155,8 @@ export function TeamDigestBanner({ digest, userId, onDismiss }: Props) {
 
 function containerStyle(t: OttoTheme): React.CSSProperties {
   return {
-    borderBottom: `1px solid ${t.isDark ? '#30363d' : '#d0d7de'}`,
-    background: t.isDark ? '#161b22' : '#f6f8fa',
+    borderBottom: `1px solid ${t.border}`,
+    background: t.bgSubtle,
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     fontSize: '12px',
     lineHeight: '1.5',
@@ -177,7 +177,7 @@ function toggleStyle(t: OttoTheme): React.CSSProperties {
     background: 'none',
     border: 'none',
     cursor: 'pointer',
-    color: t.isDark ? '#8b949e' : '#57606a',
+    color: t.textSecondary,
     fontSize: '9px',
     padding: '2px',
     lineHeight: 1,
@@ -187,7 +187,7 @@ function toggleStyle(t: OttoTheme): React.CSSProperties {
 function summaryTextStyle(t: OttoTheme): React.CSSProperties {
   return {
     flex: 1,
-    color: t.isDark ? '#c9d1d9' : '#24292f',
+    color: t.text,
     fontWeight: 500,
   };
 }
@@ -197,7 +197,7 @@ function dismissStyle(t: OttoTheme): React.CSSProperties {
     background: 'none',
     border: 'none',
     cursor: 'pointer',
-    color: t.isDark ? '#8b949e' : '#57606a',
+    color: t.textSecondary,
     fontSize: '11px',
     padding: '2px 4px',
     lineHeight: 1,
@@ -223,7 +223,7 @@ function sectionStyle(t: OttoTheme): React.CSSProperties {
 
 function sectionLabelStyle(t: OttoTheme): React.CSSProperties {
   return {
-    color: t.isDark ? '#8b949e' : '#57606a',
+    color: t.textSecondary,
     fontSize: '11px',
     fontWeight: 500,
     marginBottom: '2px',
@@ -238,13 +238,13 @@ const statRowStyle: React.CSSProperties = {
 
 function statLabelStyle(t: OttoTheme): React.CSSProperties {
   return {
-    color: t.isDark ? '#8b949e' : '#57606a',
+    color: t.textSecondary,
   };
 }
 
 function statValueStyle(t: OttoTheme): React.CSSProperties {
   return {
-    color: t.isDark ? '#c9d1d9' : '#24292f',
+    color: t.text,
     fontWeight: 500,
     fontVariantNumeric: 'tabular-nums',
   };
@@ -252,7 +252,7 @@ function statValueStyle(t: OttoTheme): React.CSSProperties {
 
 function actionLinkStyle(t: OttoTheme): React.CSSProperties {
   return {
-    color: t.isDark ? '#58a6ff' : '#0969da',
+    color: t.brand,
     textDecoration: 'none',
     display: 'block',
     overflow: 'hidden',

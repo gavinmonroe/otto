@@ -128,7 +128,7 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
 
   const btnBase: React.CSSProperties = {
     padding: '2px 8px',
-    borderRadius: '3px',
+    borderRadius: '6px',
     fontSize: '11px',
     cursor: 'pointer',
     border: `1px solid ${theme.border}`,
@@ -173,7 +173,7 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
     if (fixJob.status === 'failed') {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
-          <span style={{ fontSize: '11px', color: theme.isDark ? '#fca5a5' : '#991b1b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ fontSize: '11px', color: theme.error, display: 'flex', alignItems: 'center', gap: '4px' }}>
             <X size={12} />
             {fixJob.error || 'Fix failed'}
           </span>
@@ -250,7 +250,7 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
             padding: '6px 8px',
             fontSize: '12px',
             fontFamily: 'monospace',
-            borderRadius: '4px',
+            borderRadius: '6px',
             border: `1px solid ${theme.border}`,
             background: theme.bg,
             color: theme.text,
@@ -259,7 +259,7 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
         />
         <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
           <button
-            style={{ ...btnBase, background: theme.isDark ? '#064e3b' : '#dcfce7', color: theme.isDark ? '#4ade80' : '#166534', borderColor: theme.isDark ? '#065f46' : '#86efac' }}
+            style={{ ...btnBase, background: theme.successBg, color: theme.success, borderColor: theme.success }}
             onClick={handleSaveEdit}
           >
             Save
@@ -275,7 +275,7 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
   return (
     <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
       <button
-        style={{ ...btnBase, background: theme.isDark ? '#064e3b' : '#dcfce7', color: theme.isDark ? '#4ade80' : '#166534', borderColor: theme.isDark ? '#065f46' : '#86efac' }}
+        style={{ ...btnBase, background: theme.successBg, color: theme.success, borderColor: theme.success }}
         onClick={handleAccept}
       >
         Accept
@@ -284,7 +284,7 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
         Edit
       </button>
       <button
-        style={{ ...btnBase, background: theme.isDark ? '#450a0a' : '#fee2e2', color: theme.isDark ? '#fca5a5' : '#991b1b', borderColor: theme.isDark ? '#7f1d1d' : '#fca5a5' }}
+        style={{ ...btnBase, background: theme.errorBg, color: theme.error, borderColor: theme.errorBorder }}
         onClick={handleDismiss}
       >
         Dismiss
@@ -304,9 +304,9 @@ export function ReviewActions({ comment, onUpdateStatus }: ReviewActionsProps) {
             display: 'flex',
             alignItems: 'center',
             gap: '3px',
-            background: theme.isDark ? '#1e1b4b' : '#eef2ff',
-            color: theme.isDark ? '#a5b4fc' : '#4338ca',
-            borderColor: theme.isDark ? '#312e81' : '#a5b4fc',
+            background: theme.infoBg,
+            color: theme.info,
+            borderColor: theme.info,
           }}
           onClick={handleFix}
           title="Auto-fix: clone, apply, test, and push this suggestion"

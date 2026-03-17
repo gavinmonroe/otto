@@ -18,6 +18,7 @@ import { DEFAULT_EDGE_CASES_PROMPT } from '@/services/ai/prompts/edge-cases';
 import { DEFAULT_RELATED_FILES_PROMPT } from '@/services/ai/prompts/related-files';
 import { DEFAULT_FOLLOW_UP_PROMPT } from '@/services/ai/prompts/followup';
 import { DEFAULT_CHAT_PROMPT } from '@/services/ai/prompts/chat';
+import { DEFAULT_INQUIRY_PROMPT } from '@/services/ai/prompts/inquiry';
 import { DEFAULT_AC_VALIDATION_PROMPT } from '@/services/ai/prompts/ac-validation';
 import { DEFAULT_ADVERSARIAL_TESTS_PROMPT } from '@/services/ai/prompts/adversarial-tests';
 import { DEFAULT_CONTRACTS_PROMPT } from '@/services/ai/prompts/contracts';
@@ -39,6 +40,7 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   adversarialTests: 'Adversarial Tests',
   contracts: 'Contract Inference',
   behavioralDelta: 'Behavioral Delta',
+  inquiry: 'Line Inquiry',
 };
 
 const DEFAULT_PROMPTS: Record<AiTaskType, string> = {
@@ -52,6 +54,7 @@ const DEFAULT_PROMPTS: Record<AiTaskType, string> = {
   adversarialTests: DEFAULT_ADVERSARIAL_TESTS_PROMPT,
   contracts: DEFAULT_CONTRACTS_PROMPT,
   behavioralDelta: DEFAULT_BEHAVIORAL_DELTA_PROMPT,
+  inquiry: DEFAULT_INQUIRY_PROMPT,
 };
 
 export function CustomPromptsForm({ settings, onUpdate }: CustomPromptsFormProps) {
@@ -98,7 +101,7 @@ export function CustomPromptsForm({ settings, onUpdate }: CustomPromptsFormProps
                   <span style={{
                     fontSize: '10px',
                     padding: '1px 6px',
-                    borderRadius: '4px',
+                    borderRadius: '6px',
                     background: '#dbeafe',
                     color: '#1d4ed8',
                     fontWeight: 600,
@@ -134,7 +137,7 @@ export function CustomPromptsForm({ settings, onUpdate }: CustomPromptsFormProps
                       onClick={() => handleReset(task)}
                       style={{
                         padding: '3px 10px',
-                        borderRadius: '4px',
+                        borderRadius: '6px',
                         background: 'transparent',
                         color: '#6b7280',
                         border: '1px solid #d1d5db',

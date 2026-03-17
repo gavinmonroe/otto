@@ -149,7 +149,7 @@ function buildStyles(theme: OttoTheme, status: FollowUpStatus) {
       position: 'relative' as const,
       width: '28px',
       height: '28px',
-      borderRadius: '4px',
+      borderRadius: '6px',
       border: `1px solid ${isError ? theme.errorBorder : isComplete ? theme.brand : theme.border}`,
       background: isComplete
         ? (theme.isDark ? 'rgba(12, 147, 231, 0.15)' : 'rgba(12, 147, 231, 0.08)')

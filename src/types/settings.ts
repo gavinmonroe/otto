@@ -14,7 +14,7 @@
 
 import type { TicketProvider } from './ticket';
 
-export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'followUp' | 'chat' | 'acValidation' | 'adversarialTests' | 'contracts' | 'behavioralDelta';
+export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'followUp' | 'chat' | 'acValidation' | 'adversarialTests' | 'contracts' | 'behavioralDelta' | 'inquiry';
 
 /**
  * Features that can be individually toggled on/off by the user.
@@ -33,7 +33,8 @@ export type ToggleableFeature =
   | 'mrReviewQueue'
   | 'adversarialTests'
   | 'contracts'
-  | 'behavioralDelta';
+  | 'behavioralDelta'
+  | 'inquiry';
 
 export type GitLabHost = {
   id: string;
@@ -106,6 +107,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       adversarialTests: 'claude-sonnet-4-5',
       contracts: 'claude-sonnet-4-5',
       behavioralDelta: 'claude-sonnet-4-5',
+      inquiry: 'claude-sonnet-4-5',
     },
     temperatures: {
       summary: 0.3,
@@ -118,6 +120,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       adversarialTests: 0.3,
       contracts: 0.2,
       behavioralDelta: 0.3,
+      inquiry: 0.3,
     },
     maxTokens: {
       summary: 0,
@@ -130,6 +133,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       adversarialTests: 0,
       contracts: 0,
       behavioralDelta: 0,
+      inquiry: 0,
     },
     customPrompts: {
       summary: '',
@@ -142,6 +146,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       adversarialTests: '',
       contracts: '',
       behavioralDelta: '',
+      inquiry: '',
     },
   },
   gitlab: {
@@ -168,6 +173,7 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       adversarialTests: false,
       contracts: false,
       behavioralDelta: false,
+      inquiry: true,
     },
   },
   botto: undefined,
