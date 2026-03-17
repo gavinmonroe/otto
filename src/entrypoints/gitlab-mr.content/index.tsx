@@ -202,6 +202,13 @@ export default defineContentScript({
           }
         });
 
+        bottoClient.onMessage('FIX_OUTPUT', (msg: any) => {
+          if (msg.comment_id && Array.isArray(msg.lines)) {
+            const store = useReviewStore.getState();
+            store.appendFixOutput(msg.comment_id, msg.lines, msg.stream || 'stdout');
+          }
+        });
+
         bottoClient.onMessage('CACHED_REVIEW', (msg: any) => {
           // Botto sent us a cached review on join — hydrate the store
           if (msg.review) {

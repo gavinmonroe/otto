@@ -24,6 +24,7 @@ import { SuggestionDiff } from '@/components/SuggestionDiff';
 import { OttoLogo } from '@/components/OttoLogo';
 import { useReviewStore, FIX_STAGE_LABELS } from '@/services/review/review-store';
 import { getBottoClient } from '@/lib/botto-client';
+import { FixTerminal } from '@/components/review/FixTerminal';
 import type { FollowUpAnalysis, CommentIntent, FollowUpAction, FileChange } from '@/types/followup';
 
 type FollowUpPanelProps = {
@@ -333,6 +334,13 @@ function FollowUpFixButton({ change, commentId, changeIndex, theme }: {
               </code>
             )}
           </span>
+          {fixJob.output.length > 0 && (
+            <FixTerminal
+              lines={fixJob.output}
+              expanded={fixJob.outputExpanded}
+              onToggle={() => useReviewStore.getState().toggleFixOutputExpanded(fixKey)}
+            />
+          )}
           <button
             style={{ ...btnBase, fontSize: '10px', padding: '1px 6px', alignSelf: 'flex-start' }}
             onClick={() => useReviewStore.getState().clearFixJob(fixKey)}
@@ -350,6 +358,13 @@ function FollowUpFixButton({ change, commentId, changeIndex, theme }: {
             <X size={12} />
             {fixJob.error || 'Fix failed'}
           </span>
+          {fixJob.output.length > 0 && (
+            <FixTerminal
+              lines={fixJob.output}
+              expanded={fixJob.outputExpanded}
+              onToggle={() => useReviewStore.getState().toggleFixOutputExpanded(fixKey)}
+            />
+          )}
           <div style={{ display: 'flex', gap: '4px' }}>
             <button style={{ ...btnBase, fontSize: '10px', padding: '1px 6px' }} onClick={handleFix}>
               Retry
@@ -367,9 +382,16 @@ function FollowUpFixButton({ change, commentId, changeIndex, theme }: {
 
     // Active fix in progress
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-        <Loader2 size={12} style={{ animation: 'otto-spin 1s linear infinite', color: theme.brandText }} />
-        <span style={{ fontSize: '11px', color: theme.textSecondary }}>{label}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Loader2 size={12} style={{ animation: 'otto-spin 1s linear infinite', color: theme.brandText }} />
+          <span style={{ fontSize: '11px', color: theme.textSecondary }}>{label}</span>
+        </div>
+        <FixTerminal
+          lines={fixJob.output}
+          expanded={fixJob.outputExpanded}
+          onToggle={() => useReviewStore.getState().toggleFixOutputExpanded(fixKey)}
+        />
       </div>
     );
   }

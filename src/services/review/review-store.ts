@@ -123,6 +123,16 @@ export type FixJobState = {
   detail: string;
   commitSha: string | null;
   error: string | null;
+  /** Live container output lines streamed from Botto. */
+  output: FixOutputLine[];
+  /** Whether the terminal panel is expanded. */
+  outputExpanded: boolean;
+};
+
+/** A single line of container output. */
+export type FixOutputLine = {
+  text: string;
+  stream: 'stdout' | 'stderr';
 };
 
 /** Human-readable labels for fix pipeline stages. */
@@ -209,6 +219,8 @@ type ReviewActions = {
   startFixJob: (commentId: string) => void;
   updateFixJob: (commentId: string, update: Partial<FixJobState>) => void;
   clearFixJob: (commentId: string) => void;
+  appendFixOutput: (commentId: string, lines: string[], stream: string) => void;
+  toggleFixOutputExpanded: (commentId: string) => void;
 };
 
 const INITIAL_STATE: ReviewState = {
@@ -600,6 +612,8 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((rawSet, get
         detail: 'Requesting fix...',
         commitSha: null,
         error: null,
+        output: [],
+        outputExpanded: false,
       },
     },
   })),
@@ -618,6 +632,38 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((rawSet, get
   clearFixJob: (commentId) => set((state) => {
     const { [commentId]: _, ...remaining } = state.fixJobs;
     return { fixJobs: remaining };
+  }),
+
+  appendFixOutput: (commentId, lines, stream) => set((state) => {
+    const existing = state.fixJobs[commentId];
+    if (!existing) return {};
+    const newLines = lines.map((text) => ({ text, stream: stream as 'stdout' | 'stderr' }));
+    const combined = [...existing.output, ...newLines];
+    // Cap at 500 lines, drop oldest
+    const capped = combined.length > 500 ? combined.slice(-500) : combined;
+    // Auto-expand on first output arrival — the user is waiting for feedback
+    const shouldAutoExpand = existing.output.length === 0 && newLines.length > 0;
+    return {
+      fixJobs: {
+        ...state.fixJobs,
+        [commentId]: {
+          ...existing,
+          output: capped,
+          outputExpanded: shouldAutoExpand ? true : existing.outputExpanded,
+        },
+      },
+    };
+  }),
+
+  toggleFixOutputExpanded: (commentId) => set((state) => {
+    const existing = state.fixJobs[commentId];
+    if (!existing) return {};
+    return {
+      fixJobs: {
+        ...state.fixJobs,
+        [commentId]: { ...existing, outputExpanded: !existing.outputExpanded },
+      },
+    };
   }),
 };
 });
