@@ -38,9 +38,8 @@ function dbg(msg: string, ...args: any[]) {
 
 const GUTTER_ICON_ATTR = 'data-otto-inquiry-trigger';
 const HIGHLIGHT_ATTR = 'data-otto-inquiry-highlight';
+const HIGHLIGHT_BORDER_ATTR = 'data-otto-inquiry-highlight-border';
 const COMPOSER_ATTR = 'data-otto-inquiry-composer';
-const HIGHLIGHT_COLOR_LIGHT = 'rgba(59, 130, 246, 0.08)';
-const HIGHLIGHT_COLOR_DARK = 'rgba(96, 165, 250, 0.12)';
 
 // ---------------------------------------------------------------------------
 // Module state
@@ -72,6 +71,12 @@ let detachCheckInterval: ReturnType<typeof setInterval> | null = null;
 // subscription to detect composer↔carousel transitions. Module-level so
 // mountComposer can reset it when a new inquiry opens.
 let lastHadSlides = false;
+
+// Pointer capture state — used to lock pointer events to the drag target
+// and suppress native text selection during click+drag.
+let capturedPointerId: number | null = null;
+let capturedTarget: Element | null = null;
+let savedUserSelect: string = '';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -173,6 +178,7 @@ export function startInquirySelection(
       clearInterval(detachCheckInterval);
       detachCheckInterval = null;
     }
+    releaseDragLock();
     removeGutterIcon();
     clearHighlight();
     teardownComposer();
@@ -290,6 +296,18 @@ function onPointerDown(e: Event): void {
   pe.preventDefault();
   pe.stopPropagation();
 
+  // Capture pointer so move/up events route reliably even if the pointer
+  // leaves the diff area or crosses text/iframes during drag.
+  try {
+    (pe.target as Element).setPointerCapture(pe.pointerId);
+    capturedPointerId = pe.pointerId;
+    capturedTarget = pe.target as Element;
+  } catch { /* setPointerCapture can throw if element is removed */ }
+
+  // Suppress native text selection during drag
+  savedUserSelect = document.body.style.userSelect;
+  document.body.style.userSelect = 'none';
+
   // Close any existing composer
   teardownComposer();
   clearHighlight();
@@ -348,10 +366,22 @@ function onPointerMove(e: Event): void {
   applyHighlight(selection.fileElement, start, end);
 }
 
+/** Release pointer capture and restore user-select after a drag ends. */
+function releaseDragLock(): void {
+  if (capturedPointerId !== null && capturedTarget) {
+    try { capturedTarget.releasePointerCapture(capturedPointerId); } catch {}
+  }
+  capturedPointerId = null;
+  capturedTarget = null;
+  document.body.style.userSelect = savedUserSelect;
+  savedUserSelect = '';
+}
+
 function onPointerUp(e: Event): void {
   if (!selection?.isDragging) return;
 
   selection.isDragging = false;
+  releaseDragLock();
 
   const startLine = Math.min(selection.anchorLine, selection.currentLine);
   const endLine = Math.max(selection.anchorLine, selection.currentLine);
@@ -395,6 +425,7 @@ function onKeyDown(e: Event): void {
   if (selection?.isDragging) {
     selection.isDragging = false;
     selection = null;
+    releaseDragLock();
     clearHighlight();
     removeGutterIcon();
     return;
@@ -482,17 +513,48 @@ function removeGutterIcon(): void {
 // Line highlight
 // ---------------------------------------------------------------------------
 
+/** Build brand-derived highlight colors from the current brandHue + mode. */
+function getHighlightColors() {
+  const s = isDarkMode ? 85 : 90;
+  const l = isDarkMode ? 61 : 48;
+  return {
+    bg:     `hsla(${brandHue}, ${s}%, ${l}%, ${isDarkMode ? 0.12 : 0.09})`,
+    border: `hsla(${brandHue}, ${s}%, ${l}%, ${isDarkMode ? 0.45 : 0.55})`,
+  };
+}
+
 function applyHighlight(fileElement: Element, startLine: number, endLine: number): void {
   clearHighlight();
 
-  const highlightColor = isDarkMode ? HIGHLIGHT_COLOR_DARK : HIGHLIGHT_COLOR_LIGHT;
+  const hl = getHighlightColors();
 
   guardedMutation(() => {
     for (let line = startLine; line <= endLine; line++) {
       const row = findLineRow(fileElement, line);
-      if (row) {
-        (row as HTMLElement).setAttribute(HIGHLIGHT_ATTR, '');
-        (row as HTMLElement).style.backgroundColor = highlightColor;
+      if (!row) continue;
+
+      (row as HTMLElement).setAttribute(HIGHLIGHT_ATTR, '');
+      (row as HTMLElement).style.backgroundColor = hl.bg;
+
+      // GitLab's diff rows use CSS Grid / table cells with their own opaque
+      // backgrounds that paint over the row background. Apply the highlight
+      // to every child cell so the color is actually visible.
+      const cells = row.querySelectorAll<HTMLElement>(
+        'td, .diff-td, .diff-grid-left, .diff-grid-right, .line_content, .diff-line-num, .line-coverage, .line-codequality',
+      );
+      for (const cell of cells) {
+        cell.setAttribute(HIGHLIGHT_ATTR, '');
+        cell.style.backgroundColor = hl.bg;
+      }
+
+      // Add a 2px brand accent on the left edge of the first cell for a
+      // clear visual anchor — matches the injector design language.
+      const firstCell = row.querySelector<HTMLElement>(
+        'td:first-child, .diff-td:first-child, .diff-line-num:first-child',
+      );
+      if (firstCell) {
+        firstCell.setAttribute(HIGHLIGHT_BORDER_ATTR, '');
+        firstCell.style.boxShadow = `inset 2px 0 0 ${hl.border}`;
       }
     }
   });
@@ -500,10 +562,15 @@ function applyHighlight(fileElement: Element, startLine: number, endLine: number
 
 function clearHighlight(): void {
   guardedMutation(() => {
-    const highlighted = document.querySelectorAll(`[${HIGHLIGHT_ATTR}]`);
+    const highlighted = document.querySelectorAll<HTMLElement>(`[${HIGHLIGHT_ATTR}]`);
     for (const el of highlighted) {
-      (el as HTMLElement).removeAttribute(HIGHLIGHT_ATTR);
-      (el as HTMLElement).style.backgroundColor = '';
+      el.removeAttribute(HIGHLIGHT_ATTR);
+      el.style.backgroundColor = '';
+    }
+    const bordered = document.querySelectorAll<HTMLElement>(`[${HIGHLIGHT_BORDER_ATTR}]`);
+    for (const el of bordered) {
+      el.removeAttribute(HIGHLIGHT_BORDER_ATTR);
+      el.style.boxShadow = '';
     }
   });
 }
