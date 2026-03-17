@@ -355,7 +355,7 @@ async function initDiffsFeatures(
 
   // Code review injectors — only start if codeReview is enabled
   if (enabled?.codeReview !== false) {
-    startInlineCommentInjection(isDarkMode, ctx.signal);
+    startInlineCommentInjection(isDarkMode, brandHue, ctx.signal);
     startRiskInjection(isDarkMode, ctx.signal);
   }
 

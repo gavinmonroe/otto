@@ -53,7 +53,7 @@ const BATCH_INJECT_SIZE = 5;
  * mounts from locking the main thread during cache hydration on large MRs.
  * Falls back to setTimeout if requestIdleCallback is not available.
  */
-function batchInject(comments: ReviewComment[], isDarkMode: boolean): void {
+function batchInject(comments: ReviewComment[], isDarkMode: boolean, brandHue?: number): void {
   if (comments.length === 0) return;
 
   // Suppress redundant rescans while the initial injection is settling
@@ -65,7 +65,7 @@ function batchInject(comments: ReviewComment[], isDarkMode: boolean): void {
     const batchEnd = Math.min(index + BATCH_INJECT_SIZE, comments.length);
 
     while (index < batchEnd) {
-      injectInlineComment(comments[index], isDarkMode);
+      injectInlineComment(comments[index], isDarkMode, brandHue);
       index++;
     }
 
@@ -93,7 +93,7 @@ function batchInject(comments: ReviewComment[], isDarkMode: boolean): void {
  *
  * Returns an unsubscribe function.
  */
-export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortSignal): () => void {
+export function startInlineCommentInjection(isDarkMode: boolean, brandHue?: number, signal?: AbortSignal): () => void {
   let lastFileReviewCount = 0;
 
   // Process any reviews already in the store (e.g., from cache hydration).
@@ -108,7 +108,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
         if (comment.startLine) allComments.push(comment);
       }
     }
-    batchInject(allComments, isDarkMode);
+    batchInject(allComments, isDarkMode, brandHue);
   }
 
   // Single unified subscription — handles both new reviews AND status changes.
@@ -133,7 +133,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
       for (const fileReview of newReviews) {
         for (const comment of fileReview.comments) {
           if (comment.startLine) {
-            injectInlineComment(comment, isDarkMode);
+            injectInlineComment(comment, isDarkMode, brandHue);
           }
         }
       }
@@ -154,6 +154,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
         mounted.root.render(
           createElement(ThemeProvider, {
             isDark: isDarkMode,
+            hue: brandHue,
             children: createElement(OttoErrorBoundary, { name: 'InlineComment' },
               createElement(InlineCommentThread, {
                 comment,
@@ -198,7 +199,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
       if (pendingComments.size > 0) {
         dbg(`scroll stopped → ${pendingComments.size} pending comments, starting batched retry`);
         pruneDetachedComments();
-        batchRetryPending(isDarkMode);
+        batchRetryPending(isDarkMode, brandHue);
       }
     }, 500);
   }
@@ -209,7 +210,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
   // mounts from firing simultaneously when scrolling stops.
   let retryBatchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function batchRetryPending(isDark: boolean) {
+  function batchRetryPending(isDark: boolean, hue?: number) {
     if (scrolling) return;
     if (getHealthLevel() !== 'normal') return;
 
@@ -245,14 +246,14 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
     dbg(`batchRetry: injecting ${comments.length} comments for ${filePath}`);
     for (const [id, comment] of comments) {
       pendingComments.delete(id);
-      injectInlineComment(comment, isDark);
+      injectInlineComment(comment, isDark, hue);
     }
 
     // More visible files? Schedule with a gap between files
     if (visibleByFile.size > 1 || pendingComments.size > 0) {
       retryBatchTimer = setTimeout(() => {
         retryBatchTimer = null;
-        batchRetryPending(isDark);
+        batchRetryPending(isDark, hue);
       }, 200);
     }
   }
@@ -298,7 +299,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
       pruneDetachedComments();
       pendingFilePaths.clear();
       // Use batched retry instead of retrying all at once
-      batchRetryPending(isDarkMode);
+      batchRetryPending(isDarkMode, brandHue);
     }, 150);
   });
 
@@ -310,7 +311,7 @@ export function startInlineCommentInjection(isDarkMode: boolean, signal?: AbortS
     if (document.visibilityState === 'visible') {
       setTimeout(() => {
         pruneDetachedComments();
-        retryPendingComments(isDarkMode);
+        retryPendingComments(isDarkMode, brandHue);
       }, 500);
     }
   };
@@ -389,7 +390,7 @@ function clearFailedForFile(filePath: string): void {
  * When filePath is provided, only retries comments for that specific file —
  * this avoids O(pending × queries) on every diff-file mutation.
  */
-function retryPendingComments(isDarkMode: boolean, filePath?: string): void {
+function retryPendingComments(isDarkMode: boolean, brandHue?: number, filePath?: string): void {
   for (const [id, comment] of pendingComments) {
     // If scoped to a file, skip comments for other files
     if (filePath && comment.filePath !== filePath) continue;
@@ -397,7 +398,7 @@ function retryPendingComments(isDarkMode: boolean, filePath?: string): void {
     const fileElement = findDiffFileElement(comment.filePath);
     if (fileElement) {
       pendingComments.delete(id);
-      injectInlineComment(comment, isDarkMode);
+      injectInlineComment(comment, isDarkMode, brandHue);
     }
   }
 }
@@ -405,7 +406,7 @@ function retryPendingComments(isDarkMode: boolean, filePath?: string): void {
 /**
  * Inject a single inline comment after the referenced line in the diff.
  */
-function injectInlineComment(comment: ReviewComment, isDarkMode: boolean): void {
+function injectInlineComment(comment: ReviewComment, isDarkMode: boolean, brandHue?: number): void {
   if (!comment.startLine) return;
   if (mountedComments.has(comment.id)) return;
   if (failedComments.has(comment.id)) return;
@@ -456,6 +457,7 @@ function injectInlineComment(comment: ReviewComment, isDarkMode: boolean): void 
     root.render(
       createElement(ThemeProvider, {
         isDark: isDarkMode,
+        hue: brandHue,
         children: createElement(OttoErrorBoundary, { name: 'InlineComment' },
           createElement(InlineCommentThread, {
             comment,
