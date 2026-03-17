@@ -14,7 +14,7 @@
 
 import type { TicketProvider } from './ticket';
 
-export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'followUp' | 'chat' | 'acValidation' | 'adversarialTests' | 'contracts' | 'behavioralDelta' | 'inquiry';
+export type AiTaskType = 'summary' | 'codeReview' | 'edgeCases' | 'relatedFiles' | 'followUp' | 'chat' | 'acValidation' | 'adversarialTests' | 'contracts' | 'behavioralDelta' | 'inquiry' | 'semanticConflict' | 'clusterSummary' | 'clusterReviewOrder';
 
 /**
  * Features that can be individually toggled on/off by the user.
@@ -34,7 +34,11 @@ export type ToggleableFeature =
   | 'adversarialTests'
   | 'contracts'
   | 'behavioralDelta'
-  | 'inquiry';
+  | 'inquiry'
+  | 'conflictRadar'
+  | 'clusterBanner'
+  | 'clusterSummary'
+  | 'semanticConflictAnalysis';
 
 export type GitLabHost = {
   id: string;
@@ -108,6 +112,9 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       contracts: 'claude-sonnet-4-5',
       behavioralDelta: 'claude-sonnet-4-5',
       inquiry: 'claude-sonnet-4-5',
+      semanticConflict: 'claude-sonnet-4-5',
+      clusterSummary: 'claude-sonnet-4-5',
+      clusterReviewOrder: 'claude-haiku-4-5',
     },
     temperatures: {
       summary: 0.3,
@@ -121,6 +128,9 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       contracts: 0.2,
       behavioralDelta: 0.3,
       inquiry: 0.3,
+      semanticConflict: 0.2,
+      clusterSummary: 0.3,
+      clusterReviewOrder: 0.2,
     },
     maxTokens: {
       summary: 0,
@@ -134,6 +144,9 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       contracts: 0,
       behavioralDelta: 0,
       inquiry: 0,
+      semanticConflict: 0,
+      clusterSummary: 0,
+      clusterReviewOrder: 0,
     },
     customPrompts: {
       summary: '',
@@ -147,6 +160,9 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       contracts: '',
       behavioralDelta: '',
       inquiry: '',
+      semanticConflict: '',
+      clusterSummary: '',
+      clusterReviewOrder: '',
     },
   },
   gitlab: {
@@ -174,6 +190,10 @@ export const DEFAULT_SETTINGS: OttoSettings = {
       contracts: false,
       behavioralDelta: false,
       inquiry: true,
+      conflictRadar: true,
+      clusterBanner: true,
+      clusterSummary: true,
+      semanticConflictAnalysis: false,
     },
   },
   botto: undefined,

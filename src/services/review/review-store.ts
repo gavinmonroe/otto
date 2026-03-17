@@ -38,11 +38,37 @@ import type {
 } from '@/types/verification';
 import { EMPTY_VERIFICATION_DATA } from '@/types/verification';
 import type { FollowUpAnalysis, FollowUpStatus } from '@/types/followup';
+import type { ReviewCommentCategory, ReviewCommentSeverity } from '@/types/review';
 import type { ReviewProgress, ReviewTask } from './review-types';
 import { recordSignal } from './reviewer-prefs';
 import { INITIAL_REVIEW_PROGRESS, INITIAL_TASK_PROGRESS } from './review-types';
 import type { CachedReview } from './review-cache';
 import type { HealthLevel } from './health-monitor';
+
+// ---------------------------------------------------------------------------
+// Comment action relay — allows the content script to register a callback
+// that sends comment actions to Botto without the store importing the client.
+// ---------------------------------------------------------------------------
+
+type CommentActionRelay = (
+  projectPath: string,
+  mrIid: number,
+  commentId: string,
+  action: string,
+  category: ReviewCommentCategory,
+  severity: ReviewCommentSeverity,
+  editedBody?: string,
+) => void;
+
+let _commentActionRelay: CommentActionRelay | null = null;
+
+export function registerCommentActionRelay(relay: CommentActionRelay): void {
+  _commentActionRelay = relay;
+}
+
+export function unregisterCommentActionRelay(): void {
+  _commentActionRelay = null;
+}
 
 // --- Debug: track store update frequency ---
 let storeUpdateCount = 0;
@@ -204,7 +230,7 @@ type ReviewActions = {
   setTaskStatus: (task: ReviewTask, status: ReviewProgress[ReviewTask]['status'], error?: string) => void;
 
   // Comment actions (user interactions)
-  updateCommentStatus: (commentId: string, status: ReviewCommentStatus, editedBody?: string) => void;
+  updateCommentStatus: (commentId: string, status: ReviewCommentStatus, editedBody?: string, fromBroadcast?: boolean) => void;
 
   // Follow-up actions
   setFollowUp: (commentId: string, analysis: FollowUpAnalysis) => void;
@@ -540,7 +566,7 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((rawSet, get
   }),
 
   // Comment actions
-  updateCommentStatus: (commentId, status, editedBody) => {
+  updateCommentStatus: (commentId, status, editedBody, fromBroadcast) => {
     const state = get();
 
     // Record signal for reviewer preferences learning.
@@ -555,6 +581,20 @@ export const useReviewStore = create<ReviewState & ReviewActions>()((rawSet, get
           severity: comment.severity,
           action: status === 'dismissed' ? 'dismissed' : 'accepted',
         }).catch(() => {}); // Fire and forget — don't block UI
+
+        // Relay to Botto for team-wide learning + broadcast to peers.
+        // Skip if this action came from a broadcast (prevents infinite loop).
+        if (!fromBroadcast && _commentActionRelay && state.mrContext) {
+          _commentActionRelay(
+            state.mrContext.projectPath,
+            state.mrContext.mrIid,
+            commentId,
+            status === 'dismissed' ? 'dismissed' : 'accepted',
+            comment.category,
+            comment.severity,
+            editedBody,
+          );
+        }
       }
     }
 

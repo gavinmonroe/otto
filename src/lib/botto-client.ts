@@ -322,6 +322,8 @@ export class BottoClient {
     mrIid: number,
     commentId: string,
     action: string,
+    category?: string,
+    severity?: string,
     editedBody?: string,
   ): void {
     if (!this.isConnected()) return;
@@ -331,6 +333,8 @@ export class BottoClient {
       mr_iid: mrIid,
       comment_id: commentId,
       action,
+      category: category ?? null,
+      severity: severity ?? null,
       edited_body: editedBody ?? null,
     });
   }

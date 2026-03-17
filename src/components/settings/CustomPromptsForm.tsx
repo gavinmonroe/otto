@@ -41,6 +41,9 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   contracts: 'Contract Inference',
   behavioralDelta: 'Behavioral Delta',
   inquiry: 'Line Inquiry',
+  semanticConflict: 'Semantic Conflict',
+  clusterSummary: 'Cluster Summary',
+  clusterReviewOrder: 'Cluster Review Order',
 };
 
 const DEFAULT_PROMPTS: Record<AiTaskType, string> = {
@@ -55,6 +58,9 @@ const DEFAULT_PROMPTS: Record<AiTaskType, string> = {
   contracts: DEFAULT_CONTRACTS_PROMPT,
   behavioralDelta: DEFAULT_BEHAVIORAL_DELTA_PROMPT,
   inquiry: DEFAULT_INQUIRY_PROMPT,
+  semanticConflict: '',
+  clusterSummary: '',
+  clusterReviewOrder: '',
 };
 
 export function CustomPromptsForm({ settings, onUpdate }: CustomPromptsFormProps) {

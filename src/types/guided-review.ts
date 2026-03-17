@@ -16,6 +16,7 @@
 
 import type { ReviewComment, FileReview, EdgeCase, RelatedFile } from './review';
 import type { GitLabDiscussion } from './gitlab';
+import type { ReviewPhase } from './cluster';
 
 // ---------------------------------------------------------------------------
 // Slide variants
@@ -28,6 +29,8 @@ export type CommentSlide = {
   fileReview: FileReview;        // Parent file context (summary, risk, sibling comments)
   relatedFiles: RelatedFile[];   // Related files that reference this file
   priority: number;
+  /** Set when this slide is part of a cross-MR guided review. */
+  crossMr?: CrossMrContext;
 };
 
 export type EdgeCaseSlide = {
@@ -37,6 +40,8 @@ export type EdgeCaseSlide = {
   fileReview: FileReview | null; // May not exist if edge case references an unreviewed file
   relatedFiles: RelatedFile[];
   priority: number;
+  /** Set when this slide is part of a cross-MR guided review. */
+  crossMr?: CrossMrContext;
 };
 
 export type ThreadSlide = {
@@ -49,9 +54,25 @@ export type ThreadSlide = {
   relatedFiles: RelatedFile[];
   priority: number;
   latestReplyAt: number;         // Timestamp of most recent note (for sorting)
+  /** Set when this slide is part of a cross-MR guided review. */
+  crossMr?: CrossMrContext;
 };
 
 export type ReviewSlide = CommentSlide | EdgeCaseSlide | ThreadSlide;
+
+// ---------------------------------------------------------------------------
+// Cross-MR context — attached to slides in cross-MR guided review mode.
+// ---------------------------------------------------------------------------
+
+/** Context identifying which MR and review phase a slide belongs to. */
+export type CrossMrContext = {
+  mrIid: number;
+  mrTitle: string;
+  /** Phase from the AI-generated review order (e.g., "API Layer", "Frontend"). */
+  phase: ReviewPhase;
+  /** Index of this phase in the review order (for phase grouping in the sidebar). */
+  phaseIndex: number;
+};
 
 // ---------------------------------------------------------------------------
 // Slide completion state — tracked separately from the slide data so we

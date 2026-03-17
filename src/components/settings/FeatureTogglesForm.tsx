@@ -101,6 +101,29 @@ const VERIFICATION_FEATURES: FeatureInfo[] = [
   },
 ];
 
+const CROSS_MR_FEATURES: FeatureInfo[] = [
+  {
+    key: 'conflictRadar',
+    label: 'Conflict Radar',
+    description: 'Warns when other in-flight MRs modify the same files or overlapping line ranges. Requires Botto.',
+  },
+  {
+    key: 'clusterBanner',
+    label: 'Related MR Clusters',
+    description: 'Groups MRs sharing a Jira ticket or overlapping files and shows them as a related unit. Requires Botto.',
+  },
+  {
+    key: 'clusterSummary',
+    label: 'Cluster Summary',
+    description: 'AI-generated unified narrative across clustered MRs explaining how they fit together. Requires Botto.',
+  },
+  {
+    key: 'semanticConflictAnalysis',
+    label: 'Semantic Conflict Analysis',
+    description: 'AI-powered analysis of overlapping changes to detect logical incompatibilities beyond git merge conflicts. Higher LLM cost.',
+  },
+];
+
 export function FeatureTogglesForm({ settings, onUpdate }: Props) {
   const features = settings.preferences.enabledFeatures;
   const reviewMode = settings.preferences.reviewMode ?? 'default';
@@ -190,6 +213,19 @@ export function FeatureTogglesForm({ settings, onUpdate }: Props) {
             key={f.key}
             feature={f}
             enabled={features[f.key] ?? false}
+            onToggle={handleToggle}
+          />
+        ))}
+      </div>
+
+      <div style={{ ...groupStyle, marginBottom: 0 }}>
+        <h4 style={groupTitleStyle}>Cross-MR Awareness</h4>
+        <p style={hintStyle}>Conflict detection and MR clustering across your project. Requires a Botto server connection.</p>
+        {CROSS_MR_FEATURES.map((f) => (
+          <FeatureToggle
+            key={f.key}
+            feature={f}
+            enabled={features[f.key] ?? (f.key === 'semanticConflictAnalysis' ? false : true)}
             onToggle={handleToggle}
           />
         ))}

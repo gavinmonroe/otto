@@ -24,9 +24,11 @@ import type {
   EdgeCaseSlide,
   ThreadSlide,
   SlideCompletionMap,
+  CrossMrContext,
 } from '@/types/guided-review';
 import type { FileReview, EdgeCase, RelatedFile } from '@/types/review';
 import type { GitLabDiscussion } from '@/types/gitlab';
+import type { ClusterReviewOrder } from '@/types/cluster';
 
 // ---------------------------------------------------------------------------
 // Priority tier bases — large gaps so sub-sorting within a tier works cleanly.
@@ -280,4 +282,120 @@ function resolveLineRange(
   }
 
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-MR guided review slide builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a slide queue that interleaves slides from multiple MRs according
+ * to an AI-generated review order. Each slide gets a `crossMr` context
+ * so the UI can show phase labels and MR attribution.
+ *
+ * Phases are ordered as the AI specified (foundational → implementation → tests).
+ * Within each phase, slides follow the same priority tiers as the single-MR builder.
+ */
+export type CrossMrReviewInput = {
+  reviewOrder: ClusterReviewOrder;
+  /** Map of MR IID → that MR's review data. */
+  reviewsByMr: Map<number, {
+    mrTitle: string;
+    fileReviews: FileReview[];
+    edgeCases: EdgeCase[];
+    relatedFiles: RelatedFile[];
+  }>;
+};
+
+export function buildCrossMrSlideQueue(input: CrossMrReviewInput): ReviewSlide[] {
+  const { reviewOrder, reviewsByMr } = input;
+  const slides: ReviewSlide[] = [];
+
+  // Phase priority: first phase gets highest base, decreasing by 1000 per phase.
+  // This ensures phase ordering is respected while still allowing within-phase
+  // priority sorting (critical > warning > suggestion).
+  const PHASE_GAP = 1000;
+
+  for (let phaseIdx = 0; phaseIdx < reviewOrder.phases.length; phaseIdx++) {
+    const phase = reviewOrder.phases[phaseIdx];
+    const phaseBase = (reviewOrder.phases.length - phaseIdx) * PHASE_GAP;
+
+    const mrData = reviewsByMr.get(phase.mrIid);
+    if (!mrData) continue;
+
+    const crossMr: CrossMrContext = {
+      mrIid: phase.mrIid,
+      mrTitle: mrData.mrTitle,
+      phase,
+      phaseIndex: phaseIdx,
+    };
+
+    // Filter file reviews to only files in this phase
+    const phaseFiles = new Set(phase.files);
+    const phaseFileReviews = mrData.fileReviews.filter((fr) => phaseFiles.has(fr.filePath));
+
+    // Build file index for this phase
+    const fileByPath = new Map<string, FileReview>();
+    const fileScoreByPath = new Map<string, number>();
+    for (const fr of phaseFileReviews) {
+      fileByPath.set(fr.filePath, fr);
+      fileScoreByPath.set(fr.filePath, computeFilePriorityScore(fr));
+    }
+
+    // Comment slides for this phase
+    for (const fr of phaseFileReviews) {
+      const fileScore = fileScoreByPath.get(fr.filePath) ?? 0;
+      const related = mrData.relatedFiles.filter(
+        (rf) => rf.filePath === fr.filePath || rf.reason.includes(fr.filePath.split('/').pop() ?? ''),
+      );
+
+      for (const comment of fr.comments) {
+        let tierBase: number;
+        if (comment.severity === 'critical') tierBase = TIER_CRITICAL;
+        else if (comment.severity === 'warning') tierBase = TIER_WARNING;
+        else tierBase = TIER_SUGGESTION_INFO;
+
+        const slide: CommentSlide = {
+          kind: 'comment',
+          id: `${phase.mrIid}:${comment.id}`,
+          comment,
+          fileReview: fr,
+          relatedFiles: related,
+          priority: phaseBase + tierBase + fileScore,
+          crossMr,
+        };
+        slides.push(slide);
+      }
+    }
+
+    // Edge case slides for files in this phase
+    const phaseEdgeCases = mrData.edgeCases.filter(
+      (ec) => ec.filePath && phaseFiles.has(ec.filePath),
+    );
+    for (const ec of phaseEdgeCases) {
+      const fr = ec.filePath ? fileByPath.get(ec.filePath) ?? null : null;
+      const fileScore = ec.filePath ? (fileScoreByPath.get(ec.filePath) ?? 0) : 0;
+
+      let tierBase: number;
+      if (ec.severity === 'critical') tierBase = TIER_EDGE_CRITICAL;
+      else if (ec.severity === 'moderate') tierBase = TIER_EDGE_MODERATE;
+      else tierBase = TIER_EDGE_MINOR;
+
+      const slide: EdgeCaseSlide = {
+        kind: 'edgeCase',
+        id: `${phase.mrIid}:${ec.id}`,
+        edgeCase: ec,
+        fileReview: fr,
+        relatedFiles: [],
+        priority: phaseBase + tierBase + fileScore,
+        crossMr,
+      };
+      slides.push(slide);
+    }
+  }
+
+  // Sort descending by priority (phase ordering is baked into the priority values)
+  slides.sort((a, b) => b.priority - a.priority);
+
+  return slides;
 }

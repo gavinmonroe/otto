@@ -23,6 +23,8 @@ import { BehavioralDeltaPanel } from './BehavioralDeltaPanel';
 import { AdversarialTestsPanel } from './AdversarialTestsPanel';
 import { ContractsPanel } from './ContractsPanel';
 import { GuidedReviewPanel } from '@/components/guided-review/GuidedReviewPanel';
+import { ConflictBanner } from '@/components/conflict/ConflictBanner';
+import { ClusterBanner } from '@/components/cluster/ClusterBanner';
 import type { ToggleableFeature, ReviewMode } from '@/types/settings';
 import type { ReviewTask } from '@/services/review/review-types';
 
@@ -331,6 +333,10 @@ export function MrOverviewPanel() {
           )}
         </>
       )}
+
+      {/* Conflict Radar + Cluster Banner — shown when Botto is connected */}
+      {enabled.conflictRadar !== false && <ConflictBanner hideSemanticNotes={enabled.semanticConflictAnalysis === false} />}
+      {enabled.clusterBanner !== false && <ClusterBanner showSummary={enabled.clusterSummary !== false} />}
 
       {/* Summary */}
       {(review.summaryDelta || review.summary || review.progress.summary.status === 'error') && (

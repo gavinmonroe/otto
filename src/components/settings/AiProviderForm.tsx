@@ -26,6 +26,9 @@ const TASK_LABELS: Record<AiTaskType, string> = {
   contracts: 'Contract Inference',
   behavioralDelta: 'Behavioral Delta',
   inquiry: 'Line Inquiry',
+  semanticConflict: 'Semantic Conflict',
+  clusterSummary: 'Cluster Summary',
+  clusterReviewOrder: 'Cluster Review Order',
 };
 
 export function AiProviderForm({ settings, onUpdate }: AiProviderFormProps) {

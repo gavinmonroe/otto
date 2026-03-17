@@ -16,7 +16,7 @@ import './style.css';
 import { createRoot } from 'react-dom/client';
 import { parseMrUrl, waitForDiffsTab, observeDiffFiles } from '@/lib/dom-observer';
 import { buildMrContext } from '@/services/gitlab/mr-parser';
-import { useReviewStore } from '@/services/review/review-store';
+import { useReviewStore, registerCommentActionRelay, unregisterCommentActionRelay } from '@/services/review/review-store';
 import { startReviewStream, tryLoadCachedReview, dispatchStreamChunk } from '@/services/review/stream-dispatcher';
 import { sendMessage } from '@/lib/messaging';
 import { setMrQueuePort, getMrQueuePort, disconnectMrQueuePort } from '@/services/review/queue-bridge';
@@ -28,6 +28,7 @@ import { OttoErrorBoundary } from '@/components/OttoErrorBoundary';
 import { startInlineCommentInjection } from '@/services/review/inline-injector';
 import { startRelatedFilesSidebar } from '@/services/review/sidebar-injector';
 import { startRiskInjection } from '@/services/review/risk-injector';
+import { startConflictInjection } from '@/services/conflict/conflict-injector';
 import { startFollowUpButtonInjection } from '@/services/followup/followup-injector';
 import { startKeyboardManager } from '@/services/review/keyboard-manager';
 import { ChatPill } from '@/components/chat/ChatPill';
@@ -45,6 +46,8 @@ import { registerBottoTransport } from '@/lib/messaging';
 import { usePresenceStore } from '@/services/presence/presence-store';
 import { startViewportTracker } from '@/services/presence/viewport-tracker';
 import { startPresenceInjection } from '@/services/presence/presence-injector';
+import { initConflictClient, teardownConflictClient } from '@/services/conflict/conflict-client';
+import { initClusterClient, teardownClusterClient } from '@/services/cluster/cluster-client';
 import { DEFAULT_HUE, setGlobalBrandHue, generateCssVariables, getInjectorColors, getLogoColor, hslToHex } from '@/lib/palette';
 import { onSettingsChange } from '@/lib/storage';
 import { useInquiryStore } from '@/services/inquiry/inquiry-store';
@@ -53,11 +56,17 @@ import { startTeamInquiryInjection } from '@/services/inquiry/team-inquiry-injec
 import { startLocalInquiryInjection } from '@/services/inquiry/local-inquiry-injector';
 import { tryLoadCachedInquiries } from '@/services/inquiry/inquiry-stream-dispatcher';
 
-// Presence cleanup functions — stored at module level so the SPA navigation
-// handler can tear them down. ctx.signal only fires on content script
-// invalidation (extension update, full page nav), NOT on SPA transitions.
+// Cleanup functions — stored at module level so the SPA navigation handler
+// and ctx.onInvalidated can tear them down. ctx.signal only fires on content
+// script invalidation (extension update, full page nav), NOT on SPA transitions.
 let cleanupViewportTracker: (() => void) | null = null;
 let cleanupPresenceInjector: (() => void) | null = null;
+let cleanupConflictInjector: (() => void) | null = null;
+
+// Botto listener unsub functions — registered once in main(), cleaned up on
+// content script invalidation. These don't accumulate on SPA nav (main() only
+// runs once), but must be released when the content script is torn down.
+let bottoListenerUnsubs: Array<() => void> = [];
 
 function teardownPresence(): void {
   cleanupViewportTracker?.();
@@ -85,6 +94,13 @@ export default defineContentScript({
     // (page navigation, extension update, etc.)
     ctx.onInvalidated(() => {
       disconnectBotto();
+      unregisterCommentActionRelay();
+      // Release all Botto message listeners
+      for (const unsub of bottoListenerUnsubs) unsub();
+      bottoListenerUnsubs = [];
+      // Release conflict injector resources (MutationObserver, interval, etc.)
+      cleanupConflictInjector?.();
+      cleanupConflictInjector = null;
     });
 
     // Fetch settings once upfront — used to gate features below.
@@ -142,6 +158,11 @@ export default defineContentScript({
         try {
           await bottoClient.connect();
           registerBottoTransport(() => bottoClient);
+
+          // Relay accept/dismiss actions to Botto for team-wide learning.
+          registerCommentActionRelay((projectPath, mrIid, commentId, action, category, severity, editedBody) => {
+            bottoClient.sendCommentAction(projectPath, mrIid, commentId, action, category, severity, editedBody);
+          });
         } catch (e) {
           console.warn('[otto] Botto connection failed, falling back to local:', e);
         }
@@ -166,26 +187,29 @@ export default defineContentScript({
         // Clear stale presence data if Botto disconnects (server goes down,
         // network drop, etc). Without this, avatar dots from the last known
         // state persist indefinitely until page refresh.
-        bottoClient.onConnectionChange((state) => {
+        bottoListenerUnsubs.push(bottoClient.onConnectionChange((state) => {
           if (state === 'disconnected') {
             usePresenceStore.getState().reset();
+            teardownConflictClient();
+            teardownClusterClient();
           }
-        });
+        }));
 
         // Listen for broadcast messages from other Ottos
-        bottoClient.onMessage('COMMENT_ACTION_BROADCAST', (msg: any) => {
+        bottoListenerUnsubs.push(bottoClient.onMessage('COMMENT_ACTION_BROADCAST', (msg: any) => {
           const store = useReviewStore.getState();
-          // Update comment status in the store if we have the comment
+          // Update comment status in the store if we have the comment.
+          // fromBroadcast=true prevents re-sending back to Botto (loop guard).
           for (const fr of store.fileReviews) {
             const comment = fr.comments.find((c) => c.id === msg.comment_id);
             if (comment) {
-              store.updateCommentStatus(comment.id, msg.action, msg.edited_body);
+              store.updateCommentStatus(comment.id, msg.action, msg.edited_body, true);
               break;
             }
           }
-        });
+        }));
 
-        bottoClient.onMessage('FIX_PROGRESS', (msg: any) => {
+        bottoListenerUnsubs.push(bottoClient.onMessage('FIX_PROGRESS', (msg: any) => {
           if (msg.comment_id) {
             const store = useReviewStore.getState();
             store.updateFixJob(msg.comment_id, {
@@ -194,9 +218,9 @@ export default defineContentScript({
               detail: msg.detail,
             });
           }
-        });
+        }));
 
-        bottoClient.onMessage('FIX_COMPLETE', (msg: any) => {
+        bottoListenerUnsubs.push(bottoClient.onMessage('FIX_COMPLETE', (msg: any) => {
           if (msg.comment_id) {
             const store = useReviewStore.getState();
             if (msg.commit_sha) {
@@ -215,32 +239,39 @@ export default defineContentScript({
               });
             }
           }
-        });
+        }));
 
-        bottoClient.onMessage('FIX_OUTPUT', (msg: any) => {
+        bottoListenerUnsubs.push(bottoClient.onMessage('FIX_OUTPUT', (msg: any) => {
           if (msg.comment_id && Array.isArray(msg.lines)) {
             const store = useReviewStore.getState();
             store.appendFixOutput(msg.comment_id, msg.lines, msg.stream || 'stdout');
           }
-        });
+        }));
 
-        bottoClient.onMessage('CACHED_REVIEW', (msg: any) => {
-          // Botto sent us a cached review on join — hydrate the store
+        bottoListenerUnsubs.push(bottoClient.onMessage('CACHED_REVIEW', (msg: any) => {
+          // Botto sent us a cached review on join — hydrate the store.
+          // Guard: only hydrate if the review matches the MR we're currently
+          // viewing. Without this, a stale response arriving after SPA
+          // navigation could overwrite the new MR's store state.
           if (msg.review) {
-            useReviewStore.getState().hydrateFromCache(msg.review);
+            const currentCtx = useReviewStore.getState().mrContext;
+            const reviewMrIid = msg.review.mrIid ?? msg.mr_iid;
+            if (!currentCtx || !reviewMrIid || currentCtx.mrIid === reviewMrIid) {
+              useReviewStore.getState().hydrateFromCache(msg.review);
+            }
           }
-        });
+        }));
 
-        bottoClient.onMessage('EVENT_NOTIFICATION', (msg: any) => {
+        bottoListenerUnsubs.push(bottoClient.onMessage('EVENT_NOTIFICATION', (msg: any) => {
           if (msg.event_type === 'user_joined_mr' && msg.payload?.viewer_count > 1) {
             useReviewStore.getState().setProgressMessage(
               `${msg.payload.viewer_count} team members viewing this MR`,
             );
           }
-        });
+        }));
 
         // Presence: file-level viewer tracking
-        bottoClient.onMessage('PRESENCE_UPDATE', (msg: any) => {
+        bottoListenerUnsubs.push(bottoClient.onMessage('PRESENCE_UPDATE', (msg: any) => {
           if (msg.user_id && Array.isArray(msg.files)) {
             const files = msg.files.map((f: any) => ({
               path: f.path,
@@ -254,9 +285,9 @@ export default defineContentScript({
               msg.avatar_url ?? undefined,
             );
           }
-        });
+        }));
 
-        bottoClient.onMessage('PRESENCE_SNAPSHOT', (msg: any) => {
+        bottoListenerUnsubs.push(bottoClient.onMessage('PRESENCE_SNAPSHOT', (msg: any) => {
           if (Array.isArray(msg.viewers)) {
             const viewers = msg.viewers
               .filter((v: any) => v.user_id && Array.isArray(v.files))
@@ -272,7 +303,19 @@ export default defineContentScript({
               }));
             usePresenceStore.getState().setSnapshot(viewers);
           }
-        });
+        }));
+
+        // Initialize Conflict Radar and Cluster awareness (Botto-only features)
+        if (enabled?.conflictRadar !== false) {
+          initConflictClient(bottoClient, lightContext.projectPath, lightContext.mrIid).catch((e) => {
+            console.warn('[otto] conflict radar init failed:', e);
+          });
+        }
+        if (enabled?.clusterBanner !== false) {
+          initClusterClient(bottoClient, lightContext.projectPath, lightContext.mrIid).catch((e) => {
+            console.warn('[otto] cluster init failed:', e);
+          });
+        }
       }
     }
 
@@ -292,7 +335,22 @@ export default defineContentScript({
 
     ctx.addEventListener(window, 'wxt:locationchange', async (event) => {
       const newUrlInfo = parseMrUrl(event.newUrl.href);
-      if (!newUrlInfo) return;
+
+      // Navigated away from an MR page entirely — tear down cross-MR features
+      // so we don't leave stale listeners, presence, and Botto state running.
+      if (!newUrlInfo) {
+        const bottoClient = settings ? getBottoClient(settings) : null;
+        if (bottoClient?.isConnected()) {
+          bottoClient.leftMr();
+        }
+        teardownPresence();
+        teardownConflictClient();
+        teardownClusterClient();
+        cleanupConflictInjector?.();
+        cleanupConflictInjector = null;
+        return;
+      }
+
       if (newUrlInfo.mrIid !== urlInfo.mrIid || newUrlInfo.projectPath !== urlInfo.projectPath) {
         // Notify Botto we left the old MR
         const bottoClient = settings ? getBottoClient(settings) : null;
@@ -302,6 +360,11 @@ export default defineContentScript({
 
         // Tear down presence features (viewport tracker, injector, store)
         teardownPresence();
+        teardownConflictClient();
+        teardownClusterClient();
+        // Clean up conflict injector resources (MutationObserver, interval, etc.)
+        cleanupConflictInjector?.();
+        cleanupConflictInjector = null;
 
         // Disconnect queue port for the old MR — prevents stale chunks
         disconnectMrQueuePort();
@@ -316,6 +379,14 @@ export default defineContentScript({
           // Re-notify Botto we're viewing the new MR (triggers PRESENCE_SNAPSHOT + CACHED_REVIEW)
           if (bottoClient?.isConnected()) {
             bottoClient.viewingMr(newContext.projectPath, newContext.mrIid);
+
+            // Re-initialize conflict radar and cluster awareness for the new MR
+            if (enabled?.conflictRadar !== false) {
+              initConflictClient(bottoClient, newContext.projectPath, newContext.mrIid).catch(() => {});
+            }
+            if (enabled?.clusterBanner !== false) {
+              initClusterClient(bottoClient, newContext.projectPath, newContext.mrIid).catch(() => {});
+            }
           }
         }
       }
@@ -367,6 +438,14 @@ async function initDiffsFeatures(
   if (enabled?.codeReview !== false) {
     startInlineCommentInjection(isDarkMode, brandHue, ctx.signal);
     startRiskInjection(isDarkMode, ctx.signal);
+  }
+
+  // Conflict radar badges in diff file headers — requires Botto (store is
+  // populated by conflict-client.ts). Starts regardless of review status
+  // since conflicts exist independently of whether a review has been run.
+  if (enabled?.conflictRadar !== false) {
+    cleanupConflictInjector?.();
+    cleanupConflictInjector = startConflictInjection(isDarkMode, ctx.signal, brandHue);
   }
 
   // Related files sidebar — only start if relatedFiles is enabled
