@@ -93,6 +93,13 @@ export default defineContentScript({
     // Otherwise, fall back to basic preview strips only.
     const brandHueForMount = settings.preferences.brandHue ?? DEFAULT_HUE;
     setGlobalBrandHue(brandHueForMount);
+
+    // Listen for brandHue changes from the options page while this tab is open.
+    const unsubBrandHue = onSettingsChange((newSettings) => {
+      const newHue = newSettings.preferences.brandHue ?? DEFAULT_HUE;
+      setGlobalBrandHue(newHue);
+    });
+    ctx.onInvalidated(() => unsubBrandHue());
     if (settings.preferences.enabledFeatures?.mrReviewQueue !== false) {
       await initMrListCommandCenter(ctx, listInfo, brandHueForMount);
     } else {
