@@ -18,7 +18,6 @@ import { JiraConnectionForm } from '@/components/settings/JiraConnectionForm';
 import { ReviewerPreferencesForm } from '@/components/settings/ReviewerPreferencesForm';
 import { FeatureTogglesForm } from '@/components/settings/FeatureTogglesForm';
 import { BottoConnectionForm } from '@/components/settings/BottoConnectionForm';
-import { BottoServerConfigForm } from '@/components/settings/BottoServerConfigForm';
 import { BrandColorForm } from '@/components/settings/BrandColorForm';
 import { OttoLogo } from '@/components/OttoLogo';
 import { exportConfig, importConfig } from '@/lib/settings-io';
@@ -97,7 +96,6 @@ export function App() {
         <FeatureTogglesForm settings={settings} onUpdate={updatePreferences} />
         <GitLabConnectionForm settings={settings} onUpdate={updateSettings} />
         <BottoConnectionForm settings={settings} onUpdate={updateSettings} />
-        <BottoServerConfigForm settings={settings} />
         <JiraConnectionForm settings={settings} onUpdate={updateSettings} />
         <ReviewerPreferencesForm settings={settings} />
 
